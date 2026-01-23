@@ -2983,7 +2983,7 @@ BINARY_PATTERNS = [
     },
     {
         "name": "Prototype Pollution",
-        "pattern": r'(__proto__|constructor\s*\[|Object\.assign\s*\(\s*\{\}|\.prototype\s*=|prototype\[)',
+        "pattern": r'(__proto__|constructor\s*\[|Object\.assign\s*\(\s*\{\}|\.prototype\s*=|prototype\s*\[)',
         "severity": Severity.HIGH
     },
     
