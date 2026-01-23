@@ -74,17 +74,14 @@ A multi-language scanner providing deeper code analysis through:
 |----------|------------|---------------|
 | **Python** | `.py` | request.args/form, input(), sys.argv, os.environ |
 | **JavaScript/TypeScript** | `.js`, `.ts`, `.jsx`, `.tsx` | req.body/query/params, process.argv |
-| **Java/Kotlin/Scala** | `.java`, `.kt`, `.scala` | Method parameters, HttpServletRequest |
+| **Java** | `.java` | Method parameters, HttpServletRequest |
 | **PHP** | `.php`, `.phtml` | $_GET, $_POST, $_REQUEST, $_COOKIE, $_SERVER |
-| **C#** | `.cs` | Request.QueryString/Form/Cookies, method params |
-| **Go** | `.go` | r.FormValue(), r.URL.Query(), c.Query() (Gin) |
-| **Ruby** | `.rb`, `.erb` | params[], request, cookies, session |
 
 #### Scanner Comparison
 | Feature | vuln-scanner.py | ast-scanner.py |
 |---------|-----------------|----------------|
 | Speed | Fast | Moderate |
-| Languages | 15+ | 7 (with taint tracking) |
+| Languages | 15+ | 4 (with taint tracking) |
 | Analysis Depth | Pattern matching | Taint tracking + Data flow |
 | False Positive Rate | Higher | Lower |
 | Taint Chain Visibility | No | Yes |
@@ -419,7 +416,7 @@ jwt.decode(token);  // ✅ Detected (should use verify)
 if (password === 'admin123') { }  // ✅ Detected: Hardcoded password
 ```
 
-### Java/Kotlin Detection (AST Scanner)
+### Java Detection (AST Scanner)
 
 ```java
 // SQL Injection with taint tracking
@@ -458,7 +455,7 @@ $page = $_REQUEST['page'];
 include($page);  // ✅ Detected
 ```
 
-### C# Detection (AST Scanner)
+### C# Detection
 
 ```csharp
 // SQL Injection
@@ -474,7 +471,7 @@ BinaryFormatter bf = new BinaryFormatter();
 bf.Deserialize(stream);  // ✅ Detected (always dangerous)
 ```
 
-### Go Detection (AST Scanner)
+### Go Detection
 
 ```go
 // SQL Injection
@@ -491,7 +488,7 @@ url := r.FormValue("url")
 http.Get(url)  // ✅ Detected
 ```
 
-### Ruby Detection (AST Scanner)
+### Ruby Detection
 
 ```ruby
 # SQL Injection
@@ -631,7 +628,7 @@ vuln-scanner/
 | Reviewing specific vulnerability reports | ast-scanner.py (with --min-confidence HIGH) |
 | Need to see data flow / taint chain | ast-scanner.py |
 | Binary analysis (DLL, JAR, APK) | vuln-scanner.py |
-| Python/JS/Java/PHP/C#/Go/Ruby projects | ast-scanner.py (better accuracy) |
+| Python/JS/Java/PHP projects | ast-scanner.py (better accuracy) |
 | Shell scripts, C/C++, other languages | vuln-scanner.py |
 
 ---
