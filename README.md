@@ -55,16 +55,19 @@ A **cross-platform static code analysis tool** for detecting security vulnerabil
 - **String extraction** from compiled binaries
 - **Credential detection** in binaries (AWS keys, API tokens, connection strings)
 
-### 🧠 AST-Based Scanner v2.2 (ast-scanner.py)
+### 🧠 AST-Based Scanner v2.3 (ast-scanner.py)
 A multi-language scanner providing deeper code analysis through:
 - **Taint Tracking** - Traces user input through variable assignments and function calls
 - **Data Flow Analysis** - Follows data from sources (request params, user input) to dangerous sinks
 - **Lambda/Closure Tracking** - Tracks taint flow through lambdas and functional interfaces (Java)
 - **Callback Sink Detection** - Identifies vulnerabilities in arrow functions and callbacks (JS)
-- **Evasion Detection** - Detects obfuscation and anti-pattern techniques (26+ JS, 18+ Python patterns)
+- **Proxy/Reflect Detection** - Detects prototype pollution via Proxy handlers and Reflect.set (NEW)
+- **Computed Property Tracking** - Identifies user input used as dynamic object keys (NEW)
+- **Template Literal Analysis** - Detects NoSQL operator evasion via template literals (NEW)
+- **Evasion Detection** - Detects obfuscation and anti-pattern techniques (50+ JS, 18+ Python patterns)
 - **Context-Aware Detection** - Understands function calls, imports, and code structure
 - **Confidence Scoring** - HIGH/MEDIUM/LOW confidence ratings for each finding
-- **Reduced False Positives** - Semantic analysis filters out safe patterns
+- **Reduced False Positives** - Semantic analysis filters out safe patterns (hasOwnProperty bypass detection)
 
 #### Supported Languages (AST Scanner)
 | Language | Extensions | Taint Sources |
@@ -84,7 +87,7 @@ A multi-language scanner providing deeper code analysis through:
 | Taint Chain Visibility | No | Yes |
 | Lambda/Callback Tracking | No | Yes (Java, JS) |
 | Prototype Pollution | Basic | Comprehensive (merge functions, calls) |
-| Evasion Detection | Basic | Advanced (44+ patterns) |
+| Evasion Detection | Basic | Advanced (50+ patterns) |
 | Use Case | Broad scanning, CI/CD | Deep analysis, verification |
 
 ---
@@ -181,7 +184,7 @@ python3 vuln-scanner.py /path/to/app.dll --scan-binaries --decompile
 | `--include-ext` | | Only scan these extensions |
 | `--no-default-excludes` | | Don't use default exclusion lists |
 
-### ast-scanner.py (AST-based v2.2)
+### ast-scanner.py (AST-based v2.3)
 
 | Option | Short | Description |
 |--------|-------|-------------|
@@ -242,7 +245,7 @@ FILE: api/handlers/auth.js
   Line 12: const API_KEY = "sk_live_abc123xyz789"
 ```
 
-### AST Scanner Sample Output (v2.2)
+### AST Scanner Sample Output (v2.3)
 
 ```
     ╔═══════════════════════════════════════════════════════════════╗
@@ -484,9 +487,39 @@ data = params[:data]
 Marshal.load(data)  # ✅ Detected
 ```
 
-### 🕵️ Evasion Technique Detection (AST Scanner v2.2)
+### 🕵️ Evasion Technique Detection (AST Scanner v2.3)
 
-The AST scanner detects 44+ evasion techniques designed to bypass traditional regex-based scanners:
+The AST scanner detects 50+ evasion techniques designed to bypass traditional regex-based scanners:
+
+#### NEW: Proxy & Computed Property Attacks
+
+```javascript
+// Proxy-based Prototype Pollution (NEW)
+function createShadowObject(base) {
+    return new Proxy(base, {
+        set(target, prop, value) {
+            return Reflect.set(target, prop, value);  // ✅ Detected
+        }
+    });
+}
+const shadow = createShadowObject({});
+shadow[userKey] = userVal;  // ✅ Detected: Computed property with user input
+
+// Reflect.set/defineProperty
+Reflect.set(target, dynamicKey, value);  // ✅ Detected
+Reflect.defineProperty(obj, userProp, desc);  // ✅ Detected
+
+// NoSQL Injection via Template Literals (NEW)
+const op = "$ne";
+const query = {
+    [key]: { [`${op}`]: null }  // ✅ Detected: Template literal operator construction
+};
+db.collection('items').find(query);  // ✅ Detected
+
+// Computed property with user input in query
+const { field, value } = req.body;
+const query = { [field]: value };  // ✅ Detected: Computed property in query object
+```
 
 #### JavaScript Evasion Patterns
 

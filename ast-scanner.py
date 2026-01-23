@@ -1114,9 +1114,24 @@ class JavaScriptAnalyzer:
                 if re.search(pattern, line):
                     # Check for setTimeout/setInterval specifically - verify it's string arg
                     if 'setTimeout' in line or 'setInterval' in line:
-                        # Look for function keyword or arrow - if present, likely safe
-                        if re.search(r'setTimeout\s*\(\s*(?:function|\()', line) or \
-                           re.search(r'setInterval\s*\(\s*(?:function|\()', line):
+                        # Safe patterns - function references, arrow functions, function expressions
+                        # Function reference: setTimeout(funcName, ms) or setTimeout(obj.method, ms)
+                        # Arrow function: setTimeout(() => ..., ms) or setTimeout((...) => ..., ms)
+                        # Function expression: setTimeout(function() {...}, ms)
+                        safe_timer_pattern = (
+                            r'(?:setTimeout|setInterval)\s*\(\s*'
+                            r'(?:'
+                            r'function\s*[\(\w]|'                    # function keyword
+                            r'\([^)]*\)\s*=>|'                       # arrow with parens: () =>
+                            r'\w+\s*=>|'                             # arrow without parens: x =>
+                            r'[a-zA-Z_$][\w$]*(?:\.[a-zA-Z_$][\w$]*)*\s*,'  # function reference: name, or obj.method,
+                            r')'
+                        )
+                        if re.search(safe_timer_pattern, line):
+                            continue
+                        # Only flag if first arg looks like a string or template with interpolation
+                        string_arg_pattern = r'(?:setTimeout|setInterval)\s*\(\s*(?:["\']|`[^`]*\$\{)'
+                        if not re.search(string_arg_pattern, line):
                             continue
                     self._add_finding(i, vuln_name,
                                       VulnCategory.CODE_INJECTION, Severity.HIGH, "HIGH",
@@ -1196,7 +1211,24 @@ class JavaScriptAnalyzer:
 
     def _check_sql_injection(self):
         """Check for SQL injection patterns - including evasion techniques."""
-        sql_keywords = r'(?:SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|UNION|ORDER\s+BY|GROUP\s+BY)'
+        # SQL keywords must be word-bounded to avoid matching 'select-text-' or 'update-btn'
+        sql_keywords = r'(?:\bSELECT\b|\bINSERT\b|\bUPDATE\b|\bDELETE\b|\bDROP\b|\bCREATE\b|\bALTER\b|\bTRUNCATE\b|\bUNION\b|\bORDER\s+BY\b|\bGROUP\s+BY\b)'
+
+        # Patterns that indicate UI/DOM strings, not SQL
+        ui_false_positive_patterns = [
+            r'aria-',           # ARIA attributes
+            r'data-',           # Data attributes
+            r'class[=:]',       # CSS classes
+            r'id[=:]',          # Element IDs
+            r'-text-',          # UI text identifiers
+            r'-btn-',           # Button identifiers
+            r'-icon-',          # Icon identifiers
+            r'locale',          # i18n/locale messages
+            r'moment\.',        # Moment.js
+            r'\.css\(',         # CSS manipulation
+            r'\.addClass\(',    # jQuery class manipulation
+            r'\.attr\(',        # Attribute manipulation
+        ]
 
         for i, line in enumerate(self.source_lines, 1):
             stripped = line.strip()
@@ -1205,9 +1237,12 @@ class JavaScriptAnalyzer:
 
             # Direct string concatenation with SQL
             if re.search(rf'["\'][^"\']*{sql_keywords}[^"\']*["\']\s*\+', line, re.IGNORECASE):
-                self._add_finding(i, "SQL Injection - String concatenation",
-                                  VulnCategory.SQL_INJECTION, Severity.HIGH, "HIGH",
-                                  "SQL query uses string concatenation.")
+                # Skip if line contains UI/DOM patterns (false positives)
+                is_ui_pattern = any(re.search(pat, line, re.IGNORECASE) for pat in ui_false_positive_patterns)
+                if not is_ui_pattern:
+                    self._add_finding(i, "SQL Injection - String concatenation",
+                                      VulnCategory.SQL_INJECTION, Severity.HIGH, "HIGH",
+                                      "SQL query uses string concatenation.")
 
             # Template literals with SQL
             if re.search(rf'`[^`]*{sql_keywords}[^`]*\$\{{', line, re.IGNORECASE):
@@ -1222,17 +1257,28 @@ class JavaScriptAnalyzer:
                                   "SQL via tagged template may allow injection if not properly escaped.")
 
             # Array.join() to build SQL (evasion technique)
+            # Only flag if there's actual SQL execution context, not just DOM selectors
             if re.search(r'\.join\s*\(', line):
                 context = '\n'.join(self.source_lines[max(0, i-5):i+1])
-                if re.search(sql_keywords, context, re.IGNORECASE):
+                # Must have SQL execution sink (execute, query, prepare) not just keywords
+                sql_exec_pattern = r'\.(?:execute|query|prepare|raw|sql)\s*\('
+                # Exclude DOM/CSS selector patterns
+                dom_selector_pattern = r'\.(find|closest|querySelector|querySelectorAll|filter|children)\s*\('
+                if re.search(sql_exec_pattern, context, re.IGNORECASE) and \
+                   not re.search(dom_selector_pattern, context, re.IGNORECASE):
                     self._add_finding(i, "SQL Injection - Array.join() query construction",
                                       VulnCategory.SQL_INJECTION, Severity.HIGH, "HIGH",
                                       "SQL query built via Array.join() - evasion technique.")
 
             # String.concat() for SQL (evasion technique)
+            # Only flag if there's actual SQL execution context
             if re.search(r'\.concat\s*\(', line):
                 context = '\n'.join(self.source_lines[max(0, i-3):i+1])
-                if re.search(sql_keywords, context, re.IGNORECASE) or re.search(r'query|sql', context, re.IGNORECASE):
+                sql_exec_pattern = r'\.(?:execute|query|prepare|raw|sql)\s*\('
+                # Exclude array/DOM manipulation patterns
+                array_pattern = r'\[\s*\]\.concat|\.toArray\(\)|\.push\(|\.slice\('
+                if (re.search(sql_exec_pattern, context, re.IGNORECASE) or re.search(r'\bsql\b', context, re.IGNORECASE)) and \
+                   not re.search(array_pattern, context, re.IGNORECASE):
                     self._add_finding(i, "SQL Injection - String.concat() query construction",
                                       VulnCategory.SQL_INJECTION, Severity.HIGH, "HIGH",
                                       "SQL query built via String.concat() - evasion technique.")
@@ -1278,6 +1324,9 @@ class JavaScriptAnalyzer:
 
         # === HIGH: Unsafe merge/extend operations ===
         high_patterns = [
+            # Proxy-based prototype pollution (Reflect.set can pollute prototypes)
+            (r'Reflect\s*\.\s*set\s*\(\s*\w+\s*,\s*\w+\s*,', "Prototype Pollution - Reflect.set with dynamic property"),
+            (r'Reflect\s*\.\s*defineProperty\s*\(\s*\w+\s*,\s*\w+', "Prototype Pollution - Reflect.defineProperty with dynamic property"),
             # Lodash vulnerable functions
             (r'_\.merge\s*\(', "Prototype Pollution - lodash _.merge (vulnerable < 4.17.12)"),
             (r'_\.mergeWith\s*\(', "Prototype Pollution - lodash _.mergeWith"),
@@ -1298,26 +1347,22 @@ class JavaScriptAnalyzer:
             (r'merge\-deep\s*\(', "Prototype Pollution - merge-deep package"),
             (r'deep\-extend\s*\(', "Prototype Pollution - deep-extend package"),
             (r'extend\s*\(\s*true', "Prototype Pollution - extend with deep flag"),
-            # Evasion: Reflect.ownKeys with dynamic assignment
-            (r'Reflect\s*\.\s*ownKeys\s*\(', "Prototype Pollution - Reflect.ownKeys iteration"),
-            # Evasion: Object.getOwnPropertyDescriptor without filtering
-            (r'Object\s*\.\s*getOwnPropertyDescriptor\s*\(', "Prototype Pollution - getOwnPropertyDescriptor"),
+            # NOTE: Reflect.ownKeys and getOwnPropertyDescriptor removed - too many false positives
+            # These are common legitimate patterns; checking them separately with context below
             # Evasion: Object.defineProperty with user data
             (r'Object\s*\.\s*defineProperty\s*\([^)]+\[\s*\w+\s*\]', "Prototype Pollution - defineProperty with dynamic key"),
             # Evasion: path-based set function
             (r'setByPath\s*\(|set\s*\(\s*\w+\s*,\s*["\'][^"\']*\.[^"\']*["\']', "Prototype Pollution - Path-based property setter"),
-            # Evasion: split('.') for path traversal
-            (r'\.split\s*\(\s*["\']\.["\']\s*\)', "Prototype Pollution - Path splitting for nested access"),
+            # NOTE: split('.') removed from here - checked separately with context below
         ]
 
         # === MEDIUM: Unsafe custom implementations ===
         # Patterns that indicate custom merge without __proto__ filtering
+        # NOTE: Object.keys and Object.entries are SAFE as they don't include prototype properties
+        # Only for...in needs careful checking (in merge/extend context)
         medium_patterns = [
-            # for...in without hasOwnProperty
+            # for...in without hasOwnProperty - only in merge/extend context
             (r'for\s*\(\s*(?:const|let|var)\s+\w+\s+in\s+', "Prototype Pollution - Unsafe Object Manipulation"),
-            # Object.keys iteration with dynamic assignment
-            (r'Object\.keys\s*\([^)]+\)\.forEach', "Prototype Pollution - Object.keys iteration"),
-            (r'Object\.entries\s*\([^)]+\)\.forEach', "Prototype Pollution - Object.entries iteration"),
         ]
 
         # Track findings to avoid duplicates
@@ -1357,18 +1402,95 @@ class JavaScriptAnalyzer:
                     # Check if there's dynamic property assignment
                     has_dynamic_assign = re.search(r'\[\s*\w+\s*\]\s*=', context)
 
-                    # Check for proper __proto__ filtering (not just mention in comments)
+                    # Check for ACTUAL __proto__ filtering (not just hasOwnProperty which doesn't filter keys!)
+                    # Must explicitly check key against '__proto__' or 'constructor' AND skip/return
                     has_proto_filter = re.search(
-                        r'(?:hasOwnProperty|===\s*["\']__proto__|!==\s*["\']__proto__|'
-                        r'key\s*(?:===|!==)\s*["\']__proto__|'
-                        r'if\s*\([^)]*__proto__[^)]*\)\s*continue)',
+                        r'(?:'
+                        r'(?:key|k|prop)\s*(?:===|!==|==|!=)\s*["\'](?:__proto__|constructor)["\']|'  # key check
+                        r'["\'](?:__proto__|constructor)["\']\s*(?:===|!==|==|!=)\s*(?:key|k|prop)|'  # reverse check
+                        r'\.includes\s*\(\s*(?:key|k|prop)\s*\)|'                                      # array.includes(key)
+                        r'if\s*\([^)]*["\']__proto__["\'][^)]*\)\s*(?:continue|return|break)'          # if check with skip
+                        r')',
                         context
                     )
+                    # NOTE: hasOwnProperty does NOT protect against prototype pollution!
+                    # It only checks if source has the property, not if the key is dangerous
 
-                    if has_dynamic_assign and not has_proto_filter:
+                    # Additional check: must be in a merge/extend/clone/update function context
+                    # to reduce false positives from generic for...in loops
+                    merge_context = re.search(
+                        r'(?:function\s+(?:merge|extend|deep|clone|copy|assign|update|set|patch|recursive)|'
+                        r'(?:merge|extend|deep|clone|copy|assign|update|set|patch|recursive)\s*[=:]\s*(?:function|\())',
+                        '\n'.join(self.source_lines[max(0, i - 20):i]),
+                        re.IGNORECASE
+                    )
+
+                    if has_dynamic_assign and not has_proto_filter and merge_context:
                         self._add_finding(i, vuln_name,
                                           VulnCategory.PROTOTYPE_POLLUTION, Severity.HIGH, "MEDIUM",
                                           "Object iteration with dynamic assignment without __proto__ filtering.")
+                        found_lines.add(i)
+
+            # Context-aware check for split('.') - only flag if used for object path traversal
+            if re.search(r'\.split\s*\(\s*["\']\.["\']\s*\)', line) and i not in found_lines:
+                context = '\n'.join(self.source_lines[max(0, i - 3):min(len(self.source_lines), i + 10)])
+
+                # Safe patterns: version parsing, decimal parsing, file extensions, URL parsing
+                safe_split_patterns = [
+                    r'version',                          # version string parsing
+                    r'\.toString\(\)\.split',            # decimal/number parsing
+                    r'decimal|numeric|number|float',     # numeric operations
+                    r'filename|extension|ext\b',         # file operations
+                    r'url|host|domain|path',             # URL parsing
+                    r'moment|date|time',                 # date/time libraries
+                ]
+
+                # Dangerous patterns: object path traversal with bracket assignment
+                dangerous_patterns = [
+                    r'\.forEach\s*\([^)]*\)\s*\{[^}]*\[\s*\w+\s*\]',  # forEach with bracket access
+                    r'\.reduce\s*\([^)]*obj\s*\[\s*\w+\s*\]',         # reduce with bracket access
+                    r'for\s*\([^)]+\)\s*\{[^}]*\[\s*\w+\s*\]\s*=',    # for loop with assignment
+                    r'obj\s*=\s*obj\s*\[',                             # obj = obj[key] pattern
+                    r'target\s*\[.*\]\s*=\s*source',                   # target[key] = source
+                ]
+
+                is_safe = any(re.search(pat, context, re.IGNORECASE) for pat in safe_split_patterns)
+                is_dangerous = any(re.search(pat, context, re.IGNORECASE) for pat in dangerous_patterns)
+
+                if is_dangerous and not is_safe:
+                    self._add_finding(i, "Prototype Pollution - Path splitting for nested access",
+                                      VulnCategory.PROTOTYPE_POLLUTION, Severity.HIGH, "HIGH",
+                                      "Unsafe object manipulation that may allow prototype pollution.")
+                    found_lines.add(i)
+
+            # Check for Proxy-based prototype pollution
+            # Proxy handlers with set/defineProperty traps can be used to pollute prototypes
+            if re.search(r'new\s+Proxy\s*\(', line) and i not in found_lines:
+                # Look for set trap in the handler
+                context = '\n'.join(self.source_lines[max(0, i-2):min(len(self.source_lines), i+15)])
+                has_set_trap = re.search(r'set\s*\(\s*\w+\s*,\s*\w+\s*,\s*\w+\s*\)', context)
+                has_reflect = re.search(r'Reflect\s*\.\s*(?:set|defineProperty)', context)
+
+                if has_set_trap and has_reflect:
+                    self._add_finding(i, "Prototype Pollution - Proxy with Reflect.set trap",
+                                      VulnCategory.PROTOTYPE_POLLUTION, Severity.HIGH, "HIGH",
+                                      "Proxy set trap with Reflect.set can pollute prototypes if property name is user-controlled.")
+                    found_lines.add(i)
+
+            # Check for computed property key with user input (dynamic object keys)
+            # Pattern: obj[userKey] = value or { [userKey]: value }
+            if re.search(r'\[\s*\w+\s*\]\s*[=:]', line) and i not in found_lines:
+                context = '\n'.join(self.source_lines[max(0, i-10):i+1])
+                # Check if the key variable comes from user input
+                key_match = re.search(r'\[\s*(\w+)\s*\]\s*[=:]', line)
+                if key_match:
+                    key_var = key_match.group(1)
+                    # Check if this variable is destructured from req.body or similar
+                    user_input_pattern = rf'(?:const|let|var)\s*\{{\s*[^}}]*\b{key_var}\b[^}}]*\}}\s*=\s*req\.'
+                    if re.search(user_input_pattern, context):
+                        self._add_finding(i, "Prototype Pollution - Computed property with user input",
+                                          VulnCategory.PROTOTYPE_POLLUTION, Severity.HIGH, "HIGH",
+                                          f"Object property '{key_var}' from user input used as computed key - can pollute __proto__.")
                         found_lines.add(i)
 
         # Check for unsafe merge/extend function definitions
@@ -1376,17 +1498,21 @@ class JavaScriptAnalyzer:
 
     def _check_unsafe_merge_functions(self):
         """Detect custom merge/extend functions that lack __proto__ protection."""
-        # Find function definitions with dangerous names
+        # Find function definitions with dangerous names (expanded list)
         merge_func_def_pattern = re.compile(
             r'function\s+(deepMerge|merge|extend|deepExtend|mergeDeep|recursiveMerge|'
-            r'deepAssign|clone|deepClone|copy|deepCopy)\s*\(',
+            r'deepAssign|clone|deepClone|copy|deepCopy|deepUpdate|update|'
+            r'recursiveAssign|recursiveCopy|objectMerge|objectExtend|'
+            r'setDeep|setNested|assignDeep|patch|applyPatch)\s*\(',
             re.IGNORECASE
         )
 
         # Find function calls with potentially unsafe input
         merge_func_call_pattern = re.compile(
             r'(deepMerge|merge|extend|deepExtend|mergeDeep|recursiveMerge|'
-            r'deepAssign|clone|deepClone|copy|deepCopy)\s*\(\s*([^)]+)\)',
+            r'deepAssign|clone|deepClone|copy|deepCopy|deepUpdate|update|'
+            r'recursiveAssign|recursiveCopy|objectMerge|objectExtend|'
+            r'setDeep|setNested|assignDeep|patch|applyPatch)\s*\(\s*([^)]+)\)',
             re.IGNORECASE
         )
 
@@ -1415,11 +1541,17 @@ class JavaScriptAnalyzer:
                 has_for_in = re.search(r'for\s*\(\s*(?:const|let|var)\s+\w+\s+in', body)
                 has_dynamic_assign = re.search(r'\[\s*\w+\s*\]\s*=', body)
 
-                # Check for actual __proto__ protection (filtering, not just usage)
+                # Check for ACTUAL __proto__ protection
+                # NOTE: hasOwnProperty does NOT protect - it only checks if source has the property!
+                # Must explicitly check key against '__proto__' or 'constructor' AND skip
                 has_proto_filter = re.search(
-                    r'hasOwnProperty|'
-                    r'(?:key|prop|k)\s*(?:===|!==|==|!=)\s*["\'](?:__proto__|constructor)["\']|'
-                    r'if\s*\([^)]*["\']__proto__["\'][^)]*\)\s*(?:continue|return)',
+                    r'(?:'
+                    r'(?:key|prop|k)\s*(?:===|!==|==|!=)\s*["\'](?:__proto__|constructor|prototype)["\']|'
+                    r'["\'](?:__proto__|constructor|prototype)["\']\s*(?:===|!==|==|!=)\s*(?:key|prop|k)|'
+                    r'\.includes\s*\(\s*(?:key|prop|k)\s*\)|'
+                    r'protoCheck\.includes|blacklist\.includes|banned\.includes|'
+                    r'if\s*\([^)]*["\']__proto__["\'][^)]*\)\s*(?:continue|return|break)'
+                    r')',
                     body
                 )
 
@@ -1553,15 +1685,37 @@ class JavaScriptAnalyzer:
                     # Check if this is with user-controlled template
                     has_param = bool(self.tainted_vars & set(line.split()))
                     has_req = 'req.' in line or 'request.' in line
+                    has_user_input = re.search(r'(?:user|input|body|query|params)\.', line, re.IGNORECASE)
 
-                    if has_param or has_req:
+                    # Safe patterns - app-defined templates (not user controlled)
+                    safe_template_patterns = [
+                        r'(?:this|self)\.\w*[Tt]emplate',    # this.template, self.tableTemplate
+                        r'[Tt]emplate[A-Z]\w*',              # templateHtml, TemplateString (camelCase named templates)
+                        r'\w+[Tt]emplate\s*[,\)]',           # fooTemplate, barTemplate (as variable)
+                        r'["\'][^"\']+\.(?:html|hbs|mustache)["\']',  # file path strings
+                    ]
+                    is_safe_template = any(re.search(pat, line) for pat in safe_template_patterns)
+
+                    if has_param or has_req or has_user_input:
                         self._add_finding(i, f"{vuln_name} with user input",
                                           VulnCategory.SSTI, Severity.CRITICAL, "HIGH",
                                           "Template engine rendering user-controlled template - RCE possible.")
-                    else:
-                        self._add_finding(i, vuln_name,
-                                          VulnCategory.SSTI, Severity.HIGH, "MEDIUM",
-                                          "Template compilation/rendering with variable. Verify source.")
+                    elif not is_safe_template:
+                        # Only flag if it doesn't look like an app-defined template
+                        # and there's some indication of dynamic content
+                        context = '\n'.join(self.source_lines[max(0, i-5):i])
+                        # Check if template comes from user/dynamic source in context
+                        dynamic_source = re.search(
+                            r'(?:=\s*(?:req|request|user|input|body|query|params)\.|'
+                            r'function\s*\([^)]*template[^)]*\)|'
+                            r'template\s*=\s*\w+\s*\|\||'  # template = x || y (dynamic fallback)
+                            r'getTemplate\s*\()',  # dynamic template getter
+                            context, re.IGNORECASE
+                        )
+                        if dynamic_source:
+                            self._add_finding(i, vuln_name,
+                                              VulnCategory.SSTI, Severity.HIGH, "MEDIUM",
+                                              "Template compilation/rendering with variable. Verify source.")
 
     def _check_nosql_injection(self):
         """Check for NoSQL injection patterns - including evasion techniques."""
@@ -1575,6 +1729,18 @@ class JavaScriptAnalyzer:
             (r'\[\s*field\s*\]\s*=|\[\s*operator\s*\]\s*=', "NoSQL Injection - Dynamic field/operator"),
             # MongoDB operators
             (r'\$(?:gt|gte|lt|lte|ne|in|nin|or|and|not|nor|exists|type|regex)\s*:', "NoSQL Injection - MongoDB operator"),
+        ]
+
+        # Evasion patterns that use template literals or computed keys
+        evasion_patterns = [
+            # Template literal to construct operator: [`${op}`] or `$${name}`
+            (r'\[\s*`\$\{[^}]+\}`\s*\]', "NoSQL Injection - Template literal operator construction"),
+            (r'`\$\$\{[^}]+\}`', "NoSQL Injection - Template literal MongoDB operator"),
+            (r'\[\s*`[^`]*\$[^`]*`\s*\]', "NoSQL Injection - Template literal with $ in computed key"),
+            # Computed key with variable that could be operator: [key]: { ... }
+            (r'\[\s*\w+\s*\]\s*:\s*\{', "NoSQL Injection - Computed property in query object"),
+            # Variable assignment of MongoDB operators
+            (r'(?:const|let|var)\s+\w+\s*=\s*["\']?\$(?:ne|gt|gte|lt|lte|in|nin|or|and|not|regex)', "NoSQL Injection - MongoDB operator in variable"),
         ]
 
         for i, line in enumerate(self.source_lines, 1):
@@ -1592,6 +1758,22 @@ class JavaScriptAnalyzer:
                         self._add_finding(i, vuln_name,
                                           VulnCategory.NOSQL_INJECTION, Severity.HIGH, "HIGH",
                                           "Potential NoSQL injection vulnerability.")
+
+            # Check evasion patterns
+            for pattern, vuln_name in evasion_patterns:
+                if re.search(pattern, line):
+                    context = '\n'.join(self.source_lines[max(0, i-5):min(len(self.source_lines), i+5)])
+                    # Must be near a database operation
+                    has_db_context = re.search(
+                        r'\.find\s*\(|\.findOne\s*\(|\.aggregate\s*\(|\.updateOne\s*\(|'
+                        r'\.updateMany\s*\(|\.deleteOne\s*\(|\.deleteMany\s*\(|'
+                        r'collection\s*\(|\.db\.|query\s*=|Query\s*\(',
+                        context, re.IGNORECASE
+                    )
+                    if has_db_context:
+                        self._add_finding(i, vuln_name,
+                                          VulnCategory.NOSQL_INJECTION, Severity.HIGH, "HIGH",
+                                          "NoSQL injection via operator evasion technique.")
 
     def _check_path_traversal(self):
         """Check for path traversal vulnerabilities - including evasion techniques."""
@@ -1763,16 +1945,18 @@ class JavaScriptAnalyzer:
         high_patterns = [
             # libxmljs (needs secure config)
             (r'libxml(?:js)?\s*\.\s*parseXml(?:String)?\s*\(', "XXE - libxmljs.parseXml"),
-            # xmldom
-            (r'new\s+(?:xmldom\s*\.\s*)?DOMParser\s*\(', "XXE - xmldom DOMParser"),
+            # xmldom (specific xmldom module, not browser DOMParser)
+            (r'new\s+xmldom\s*\.\s*DOMParser\s*\(', "XXE - xmldom DOMParser"),
+            (r'require\s*\(["\']xmldom["\']\)', "XXE - xmldom import"),
             # xml2js
             (r'xml2js\s*\.\s*parseString\s*\(', "XXE - xml2js.parseString"),
             (r'new\s+xml2js\s*\.\s*Parser\s*\(', "XXE - xml2js.Parser"),
             # sax parser
             (r'sax\s*\.\s*parser\s*\(', "XXE - sax parser"),
-            # Generic DOMParser
-            (r'new\s+DOMParser\s*\(\s*\)', "XXE - DOMParser"),
-            (r'\.parseFromString\s*\([^,]+,\s*["\'](?:text|application)/xml', "XXE - parseFromString"),
+            # parseFromString with XML MIME type only (not text/html)
+            (r'\.parseFromString\s*\([^,]+,\s*["\'](?:text|application)/xml', "XXE - parseFromString with XML"),
+            # NOTE: Removed generic DOMParser pattern - browser DOMParser with text/html is safe
+            # XXE is only a risk when parsing XML, not HTML
         ]
 
         for i, line in enumerate(self.source_lines, 1):
@@ -1830,8 +2014,8 @@ class JavaScriptAnalyzer:
             # libxmljs .find() method for XPath
             (r'\.find\s*\(\s*xpath', "XPath Injection - libxmljs find"),
             (r'xmlDoc\.find\s*\(', "XPath Injection - xmlDoc.find"),
-            # Generic XPath construction
-            (r'["\'][^"\']*//[^"\']*["\']\s*\+', "XPath Injection - XPath concatenation"),
+            # NOTE: Generic XPath concatenation pattern removed - handled separately below
+            # with context-aware filtering to avoid URL protocol false positives
         ]
 
         for i, line in enumerate(self.source_lines, 1):
@@ -1854,12 +2038,30 @@ class JavaScriptAnalyzer:
                                           "Dynamic XPath construction detected.")
 
             # Detect XPath string construction with concatenation (common evasion)
-            # Pattern: variable = "...//..." + userInput + "..."
-            if re.search(r'=\s*["\'][^"\']*//[^"\']*["\'].*\+', line) or \
-               re.search(r'\+\s*["\'][^"\']*//[^"\']*["\']', line):
-                self._add_finding(i, "XPath Injection - XPath string concatenation",
-                                  VulnCategory.XPATH_INJECTION, Severity.HIGH, "HIGH",
-                                  "XPath query constructed via string concatenation.")
+            # Must look like actual XPath, not URL protocols or generic strings
+            # XPath indicators: //, @, [], ancestor::, descendant::, etc.
+            xpath_indicators = r'(?:\[@|ancestor::|descendant::|following::|preceding::|child::|parent::|\]\s*/)'
+            # Exclude URL protocol patterns and generic error/log messages
+            url_protocol_pattern = r'(?:\.substring|\.slice|\.substr|\.startsWith|\.indexOf|\.match)\s*\([^)]*["\'][/]{2}'
+            log_error_pattern = r'(?:log|error|warn|info|debug|console\.)'
+
+            has_xpath_concat = re.search(r'=\s*["\'][^"\']*//[^"\']*["\'].*\+', line) or \
+                               re.search(r'\+\s*["\'][^"\']*//[^"\']*["\']', line)
+
+            if has_xpath_concat:
+                # Only flag if it looks like XPath (has XPath-specific syntax)
+                # or is near XPath-related function calls
+                context = '\n'.join(self.source_lines[max(0, i-3):min(len(self.source_lines), i+3)])
+                is_xpath_context = re.search(xpath_indicators, line) or \
+                                   re.search(r'xpath|selectNodes|selectSingleNode|evaluate', context, re.IGNORECASE)
+                is_url_check = re.search(url_protocol_pattern, line) or \
+                               re.search(r'["\']//["\']|protocol|href|location\.', line, re.IGNORECASE)
+                is_log_message = re.search(log_error_pattern, line, re.IGNORECASE)
+
+                if is_xpath_context and not is_url_check and not is_log_message:
+                    self._add_finding(i, "XPath Injection - XPath string concatenation",
+                                      VulnCategory.XPATH_INJECTION, Severity.HIGH, "HIGH",
+                                      "XPath query constructed via string concatenation.")
 
     def _check_auth_bypass(self):
         """Check for authentication bypass vulnerabilities - including evasion techniques."""
