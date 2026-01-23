@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Advanced Vulnerability Scanner v3.0
+Advanced Vulnerability Scanner v3.1
 ====================================
 Cross-platform (Windows/Kali Linux) vulnerability scanner with .NET DLL decompilation support.
 
@@ -1465,7 +1465,7 @@ BINARY_PATTERNS = [
     {"name": "Hardcoded Credentials", "pattern": r'(password|passwd|pwd|secret|api[_-]?key|token)\s*[=:]\s*["\'][^"\']+["\']', "severity": Severity.HIGH},
     {"name": "SQL Query Pattern", "pattern": r'(SELECT|INSERT|UPDATE|DELETE|DROP|TRUNCATE)\s+.*(FROM|INTO|SET|TABLE)', "severity": Severity.MEDIUM},
     {"name": "Deserialization Indicators", "pattern": r'(BinaryFormatter|ObjectInputStream|pickle|unserialize|Marshal\.load|yaml\.load|NetDataContractSerializer|LosFormatter|SoapFormatter|ObjectStateFormatter|JavaScriptSerializer|JsonConvert\.DeserializeObject|TypeNameHandling|XmlSerializer|DataContractSerializer|XamlReader|XamlServices|fastJSON|JSON\.ToObject|YamlDotNet|Deserializer|ResourceReader|ResXResourceReader)', "severity": Severity.HIGH},
-    {"name": "Weak Crypto", "pattern": r'(MD5|SHA1|DES|RC4|ECB|TripleDES)', "severity": Severity.MEDIUM},
+    {"name": "Weak Crypto", "pattern": r'(MD5CryptoServiceProvider|MD5.Create|SHA1CryptoServiceProvider|SHA1.Create|DESCryptoServiceProvider|TripleDESCryptoServiceProvider|CipherMode.ECB)', "severity": Severity.MEDIUM},
     {"name": "URL/Endpoint", "pattern": r'https?://[a-zA-Z0-9.-]+(/[a-zA-Z0-9./_-]*)?', "severity": Severity.INFO},
     {"name": "Private Key", "pattern": r'-----BEGIN (RSA |DSA |EC )?PRIVATE KEY-----', "severity": Severity.CRITICAL},
     {"name": "AWS Credentials", "pattern": r'(AKIA[0-9A-Z]{16}|aws_secret_access_key)', "severity": Severity.CRITICAL},
@@ -1706,7 +1706,7 @@ class VulnerabilityScanner:
         'package-lock.json', 'yarn.lock', 'composer.lock', 'Gemfile.lock',
         'poetry.lock', 'Cargo.lock', 'go.sum', 'pnpm-lock.yaml',
         # Scanner itself
-        'vuln_scanner.py', 'vuln-scanner.py', 'scanner.py',
+        'vuln_scanner.py', 'vuln-scanner.py', 'scanner.py', 'Parsedown.php', 'recaptchalib.php',
         # Common JS libraries - reduce false positives
         'jquery.js', 'jquery.min.js', 'jquery-3.7.1.js', 'jquery-3.7.1.min.js',
         'jquery-3.7.1.slim.js', 'jquery-3.7.1.slim.min.js',
@@ -2353,7 +2353,7 @@ Examples:
         ╔═╗┌─┐┌─┐┬ ┬┬─┐┬┌┬┐┬ ┬  ╔═╗┌─┐┌─┐┌┐┌┌┐┌┌─┐┬─┐
         ╚═╗├┤ │  │ │├┬┘│ │ └┬┘  ╚═╗│  ├─┤││││││├┤ ├┬┘
         ╚═╝└─┘└─┘└─┘┴└─┴ ┴  ┴   ╚═╝└─┘┴ ┴┘└┘┘└┘└─┘┴└─
-                Source Code Security Scanner v3.0
+                Source Code Security Scanner v3.1
                       by worldtreeboy
     """
     print(banner)
