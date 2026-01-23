@@ -14,7 +14,7 @@
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Kali-lightgrey.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-A **cross-platform static code analysis tool** for detecting security vulnerabilities in source code. Supports 15+ programming languages with .NET DLL decompilation, JAR/APK analysis, and comprehensive vulnerability pattern detection.
+A **cross-platform static code analysis tool** for detecting security vulnerabilities in source code. Supports multiple programming languages with .NET DLL decompilation and comprehensive vulnerability pattern detection.
 
 **Now with dual scanning modes:**
 - **Regex-based scanning** (`vuln-scanner.py`) - Fast, comprehensive pattern matching
@@ -30,11 +30,9 @@ A **cross-platform static code analysis tool** for detecting security vulnerabil
 | **JavaScript/TypeScript** | `.js`, `.ts`, `.jsx`, `.tsx`, `.mjs` |
 | **Python** | `.py` |
 | **PHP** | `.php`, `.phtml` |
-| **Java/Kotlin** | `.java`, `.kt`, `.scala` |
+| **Java** | `.java`, `.scala` |
 | **C#/.NET** | `.cs`, `.vb` |
 | **Ruby** | `.rb`, `.erb` |
-| **Go** | `.go` |
-| **Shell** | `.sh`, `.bash` |
 
 ### 🎯 Vulnerability Categories
 
@@ -54,7 +52,6 @@ A **cross-platform static code analysis tool** for detecting security vulnerabil
 
 ### 🔬 Binary Analysis (Optional)
 - **.NET DLL Decompilation** via ILSpy (Linux) or dnSpy (Windows)
-- **JAR/WAR/APK** archive extraction and analysis
 - **String extraction** from compiled binaries
 - **Credential detection** in binaries (AWS keys, API tokens, connection strings)
 
@@ -157,7 +154,7 @@ python3 ast-scanner.py /path/to/project -o ast-report.json --output json
 ### Binary Analysis
 
 ```bash
-# Enable binary scanning (DLL, EXE, JAR, APK)
+# Enable binary scanning (DLL, EXE)
 python3 vuln-scanner.py /path/to/project --scan-binaries
 
 # Enable .NET decompilation (requires ilspycmd)
@@ -176,7 +173,7 @@ python3 vuln-scanner.py /path/to/app.dll --scan-binaries --decompile
 | `--output-file` | `-o` | Save report to file |
 | `--verbose` | `-v` | Show detailed scanning progress |
 | `--category` | `-c` | Categories to scan (sql, nosql, code, auth, ssti, ssrf, etc.) |
-| `--scan-binaries` | `-b` | Enable DLL/EXE/JAR binary analysis |
+| `--scan-binaries` | `-b` | Enable DLL/EXE binary analysis |
 | `--decompile` | `-d` | Decompile .NET binaries using ILSpy |
 | `--exclude-dir` | | Additional directories to exclude |
 | `--exclude-file` | | Additional files to exclude |
@@ -471,23 +468,6 @@ BinaryFormatter bf = new BinaryFormatter();
 bf.Deserialize(stream);  // ✅ Detected (always dangerous)
 ```
 
-### Go Detection
-
-```go
-// SQL Injection
-id := r.FormValue("id")
-query := fmt.Sprintf("SELECT * FROM users WHERE id = %s", id)  // ✅ Detected
-db.Query(query)
-
-// Command Injection
-cmd := r.URL.Query().Get("cmd")
-exec.Command(cmd).Run()  // ✅ Detected
-
-// SSRF
-url := r.FormValue("url")
-http.Get(url)  // ✅ Detected
-```
-
 ### Ruby Detection
 
 ```ruby
@@ -627,9 +607,9 @@ vuln-scanner/
 | CI/CD pipeline quick check | vuln-scanner.py |
 | Reviewing specific vulnerability reports | ast-scanner.py (with --min-confidence HIGH) |
 | Need to see data flow / taint chain | ast-scanner.py |
-| Binary analysis (DLL, JAR, APK) | vuln-scanner.py |
+| Binary analysis (DLL, EXE) | vuln-scanner.py |
 | Python/JS/Java/PHP projects | ast-scanner.py (better accuracy) |
-| Shell scripts, C/C++, other languages | vuln-scanner.py |
+| C/C++, other languages | vuln-scanner.py |
 
 ---
 
