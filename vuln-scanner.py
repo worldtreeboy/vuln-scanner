@@ -79,11 +79,11 @@ class Finding:
 # =============================================================================
 
 VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
-    
+
     # =========================================================================
     # CODE INJECTION - JavaScript/Node.js
     # =========================================================================
-    
+
     VulnerabilityPattern(
         name="Code Injection - JavaScript eval",
         category=VulnCategory.CODE_INJECTION,
@@ -96,24 +96,24 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         ],
         severity=Severity.CRITICAL,
         languages=[".js", ".ts", ".jsx", ".tsx"],
-        false_positive_patterns=[r'//.*\beval', r'/\*.*\beval', r'\.evaluate\(', r'evalua', r'literal_eval']
+    false_positive_patterns=[r'//.*\beval', r'/\*.*\beval', r'\.evaluate\(', r'evalua', r'literal_eval']
     ),
-    VulnerabilityPattern(
-        name="Code Injection - new Function Constructor",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - new Function Constructor",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'\bnew\s+Function\s*\(\s*["\'\`]',
             r'[=:]\s*Function\s*\(\s*["\'\`]',
             r'Function\.prototype\.constructor\s*\(\s*["\'\`]',
         ],
         severity=Severity.CRITICAL,
         languages=[".js", ".ts", ".jsx", ".tsx"],
-        false_positive_patterns=[r'//.*Function', r'isFunction', r'typeof\s+\w+\s*[=!]==?\s*["\']function', r'function\s+\w+\s*\('],
+    false_positive_patterns=[r'//.*Function', r'isFunction', r'typeof\s+\w+\s*[=!]==?\s*["\']function', r'function\s+\w+\s*\('],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - setTimeout/setInterval string",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - setTimeout/setInterval string",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'setTimeout\s*\(\s*["\'].*\+',
             r'setTimeout\s*\(\s*`.*\$\{',
             r'setInterval\s*\(\s*["\'].*\+',
@@ -121,12 +121,12 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         ],
         severity=Severity.MEDIUM,
         languages=[".js", ".ts", ".jsx", ".tsx"],
-        false_positive_patterns=[r'setTimeout\s*\(\s*function', r'setTimeout\s*\(\s*\(\)', r'session_alive'],
+    false_positive_patterns=[r'setTimeout\s*\(\s*function', r'setTimeout\s*\(\s*\(\)', r'session_alive'],
     ),
-    VulnerabilityPattern(
-        name="Command Injection - child_process exec",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Command Injection - child_process exec",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'exec\s*\(\s*["\'].*\+',
             r'exec\s*\(\s*`',
             r'exec\s*\(\s*req\.',
@@ -136,12 +136,12 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         ],
         severity=Severity.CRITICAL,
         languages=[".js", ".ts"],
-        false_positive_patterns=[r'execFile', r'//.*exec']
+    false_positive_patterns=[r'execFile', r'//.*exec']
     ),
-    VulnerabilityPattern(
-        name="Command Injection - child_process execSync",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Command Injection - child_process execSync",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'execSync\s*\(\s*["\'].*\+',
             r'execSync\s*\(\s*`',
             r'execSync\s*\(\s*req\.',
@@ -152,10 +152,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.CRITICAL,
         languages=[".js", ".ts"],
     ),
-    VulnerabilityPattern(
-        name="Command Injection - child_process spawn",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Command Injection - child_process spawn",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'spawn\s*\(\s*["\'].*\+',
             r'spawn\s*\(\s*`',
             r'spawn\s*\(\s*req\.',
@@ -169,10 +169,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.HIGH,
         languages=[".js", ".ts"],
     ),
-    VulnerabilityPattern(
-        name="Command Injection - child_process execFile",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Command Injection - child_process execFile",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'execFile\s*\(\s*req\.',
             r'execFile\s*\(\s*request\.',
             r'execFileSync\s*\(\s*req\.',
@@ -182,10 +182,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.HIGH,
         languages=[".js", ".ts"],
     ),
-    VulnerabilityPattern(
-        name="Command Injection - child_process fork",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Command Injection - child_process fork",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'fork\s*\(\s*req\.',
             r'fork\s*\(\s*request\.',
             r'child_process\.fork\s*\(',
@@ -193,10 +193,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.HIGH,
         languages=[".js", ".ts"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - vm module",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - vm module",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'vm\.runInContext\s*\(',
             r'vm\.runInNewContext\s*\(',
             r'vm\.runInThisContext\s*\(',
@@ -208,10 +208,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.CRITICAL,
         languages=[".js", ".ts"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - require with variable",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - require with variable",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'require\s*\(\s*req\.',
             r'require\s*\(\s*request\.',
             r'require\s*\(\s*\w+\s*\+',
@@ -221,12 +221,12 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         ],
         severity=Severity.HIGH,
         languages=[".js", ".ts"],
-        false_positive_patterns=[r'require\s*\(\s*["\'][^"\']+["\']\s*\)']
+    false_positive_patterns=[r'require\s*\(\s*["\'][^"\']+["\']\s*\)']
     ),
-    VulnerabilityPattern(
-        name="Code Injection - process.binding",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - process.binding",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'process\.binding\s*\(',
             r'process\.dlopen\s*\(',
             r'process\._linkedBinding\s*\(',
@@ -234,10 +234,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.HIGH,
         languages=[".js", ".ts"],
     ),
-    VulnerabilityPattern(
-        name="Prototype Pollution",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Prototype Pollution",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'__proto__',
             r'constructor\s*\[\s*["\']prototype["\']\s*\]',
             r'\[\s*["\']__proto__["\']\s*\]',
@@ -251,14 +251,14 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         languages=[".js", ".ts", ".jsx", ".tsx"],
     ),
 
-    # =========================================================================
-    # CODE INJECTION - Python
-    # =========================================================================
-    
-    VulnerabilityPattern(
-        name="Code Injection - Python eval",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            # =========================================================================
+            # CODE INJECTION - Python
+            # =========================================================================
+
+            VulnerabilityPattern(
+            name="Code Injection - Python eval",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'\beval\s*\(\s*.*request\.',
             r'\beval\s*\(\s*.*input\s*\(',
             r'\beval\s*\(\s*.*argv',
@@ -269,12 +269,12 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         ],
         severity=Severity.CRITICAL,
         languages=[".py"],
-        false_positive_patterns=[r'#.*\beval', r'ast\.literal_eval']
+    false_positive_patterns=[r'#.*\beval', r'ast\.literal_eval']
     ),
-    VulnerabilityPattern(
-        name="Code Injection - Python exec",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - Python exec",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'\bexec\s*\(\s*.*request\.',
             r'\bexec\s*\(\s*.*input\s*\(',
             r'\bexec\s*\(\s*.*argv',
@@ -285,12 +285,12 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         ],
         severity=Severity.CRITICAL,
         languages=[".py"],
-        false_positive_patterns=[r'#.*\bexec']
+    false_positive_patterns=[r'#.*\bexec']
     ),
-    VulnerabilityPattern(
-        name="Code Injection - Python compile",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - Python compile",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'\bcompile\s*\(\s*.*request\.',
             r'\bcompile\s*\(\s*.*input\s*\(',
             r'\bcompile\s*\(\s*f["\']',
@@ -298,10 +298,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.HIGH,
         languages=[".py"],
     ),
-    VulnerabilityPattern(
-        name="Command Injection - Python os.system",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Command Injection - Python os.system",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'os\.system\s*\(',
             r'os\.popen\s*\(',
             r'os\.popen2\s*\(',
@@ -313,10 +313,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.CRITICAL,
         languages=[".py"],
     ),
-    VulnerabilityPattern(
-        name="Command Injection - Python subprocess",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Command Injection - Python subprocess",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'subprocess\.call\s*\(\s*["\']',
             r'subprocess\.call\s*\(\s*f["\']',
             r'subprocess\.call\s*\(\s*.*shell\s*=\s*True',
@@ -333,22 +333,22 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         ],
         severity=Severity.CRITICAL,
         languages=[".py"],
-        false_positive_patterns=[r'shell\s*=\s*False']
+    false_positive_patterns=[r'shell\s*=\s*False']
     ),
-    VulnerabilityPattern(
-        name="Command Injection - Python commands module",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Command Injection - Python commands module",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'commands\.getoutput\s*\(',
             r'commands\.getstatusoutput\s*\(',
         ],
         severity=Severity.CRITICAL,
         languages=[".py"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - Python importlib",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - Python importlib",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'importlib\.import_module\s*\(\s*.*request',
             r'importlib\.import_module\s*\(\s*.*input',
             r'__import__\s*\(\s*.*request',
@@ -357,10 +357,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.HIGH,
         languages=[".py"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - Python builtins",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - Python builtins",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'__builtins__\s*\[',
             r'__import__\s*\(\s*.*request\.',
             r'__import__\s*\(\s*.*input\s*\(',
@@ -369,17 +369,17 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         ],
         severity=Severity.MEDIUM,
         languages=[".py"],
-        false_positive_patterns=[r'__builtins__\s*=\s*\{\}', r'#.*__builtins__', r'getattr\s*\(\s*frappe\.local'],
+    false_positive_patterns=[r'__builtins__\s*=\s*\{\}', r'#.*__builtins__', r'getattr\s*\(\s*frappe\.local'],
     ),
 
-    # =========================================================================
-    # CODE INJECTION - PHP
-    # =========================================================================
-    
-    VulnerabilityPattern(
-        name="Code Injection - PHP eval",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            # =========================================================================
+            # CODE INJECTION - PHP
+            # =========================================================================
+
+            VulnerabilityPattern(
+            name="Code Injection - PHP eval",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'\beval\s*\(\s*\$',
             r'\beval\s*\(\s*\$_(GET|POST|REQUEST|COOKIE)',
             r'\beval\s*\(\s*base64_decode',
@@ -389,39 +389,39 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.CRITICAL,
         languages=[".php"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - PHP assert",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - PHP assert",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'\bassert\s*\(\s*\$',
             r'\bassert\s*\(\s*\$_(GET|POST|REQUEST|COOKIE)',
         ],
         severity=Severity.CRITICAL,
         languages=[".php"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - PHP create_function",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - PHP create_function",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'create_function\s*\(',
         ],
         severity=Severity.HIGH,
         languages=[".php"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - PHP preg_replace /e",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - PHP preg_replace /e",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'preg_replace\s*\(\s*["\']/.*/e',
             r'preg_replace\s*\(\s*\$.*,.*\$',
         ],
         severity=Severity.CRITICAL,
         languages=[".php"],
     ),
-    VulnerabilityPattern(
-        name="Command Injection - PHP system/exec/shell_exec",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Command Injection - PHP system/exec/shell_exec",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'\bsystem\s*\(\s*\$',
             r'\bsystem\s*\(\s*\$_(GET|POST|REQUEST)',
             r'\bexec\s*\(\s*\$',
@@ -433,12 +433,12 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         ],
         severity=Severity.CRITICAL,
         languages=[".php"],
-        false_positive_patterns=[r'fpassthru'],
+    false_positive_patterns=[r'fpassthru'],
     ),
-    VulnerabilityPattern(
-        name="Command Injection - PHP popen/proc_open",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Command Injection - PHP popen/proc_open",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'\bpopen\s*\(\s*\$',
             r'proc_open\s*\(\s*\$',
             r'pcntl_exec\s*\(\s*\$',
@@ -446,20 +446,20 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.CRITICAL,
         languages=[".php"],
     ),
-    VulnerabilityPattern(
-        name="Command Injection - PHP backticks",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Command Injection - PHP backticks",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'`\s*\$',
             r'`.*\$_(GET|POST|REQUEST)',
         ],
         severity=Severity.CRITICAL,
         languages=[".php"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - PHP include/require",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - PHP include/require",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'\binclude\s*\(\s*\$_(GET|POST|REQUEST)',
             r'\binclude\s*\s+\$_(GET|POST|REQUEST)',
             r'include_once\s*\(\s*\$_(GET|POST|REQUEST)',
@@ -470,10 +470,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.CRITICAL,
         languages=[".php"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - PHP call_user_func",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - PHP call_user_func",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'call_user_func\s*\(\s*\$_(GET|POST|REQUEST|COOKIE)',
             r'call_user_func_array\s*\(\s*\$_(GET|POST|REQUEST|COOKIE)',
             r'array_map\s*\(\s*\$_(GET|POST|REQUEST)',
@@ -481,17 +481,17 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         ],
         severity=Severity.HIGH,
         languages=[".php"],
-        false_positive_patterns=[r'\$closure', r'\$callback', r'\$handler', r'\$func'],
+    false_positive_patterns=[r'\$closure', r'\$callback', r'\$handler', r'\$func'],
     ),
 
-    # =========================================================================
-    # CODE INJECTION - Ruby
-    # =========================================================================
-    
-    VulnerabilityPattern(
-        name="Code Injection - Ruby eval",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            # =========================================================================
+            # CODE INJECTION - Ruby
+            # =========================================================================
+
+            VulnerabilityPattern(
+            name="Code Injection - Ruby eval",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'\beval\s*\(\s*params',
             r'\beval\s*\(\s*request',
             r'\beval\s*\s+params',
@@ -502,10 +502,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.CRITICAL,
         languages=[".rb"],
     ),
-    VulnerabilityPattern(
-        name="Command Injection - Ruby system/exec/backticks",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Command Injection - Ruby system/exec/backticks",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'\bsystem\s*\(\s*.*params',
             r'\bsystem\s*\s+.*params',
             r'\bexec\s*\(\s*.*params',
@@ -522,10 +522,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.CRITICAL,
         languages=[".rb"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - Ruby send/public_send",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - Ruby send/public_send",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'\.send\s*\(\s*params',
             r'\.public_send\s*\(\s*params',
             r'__send__\s*\(\s*params',
@@ -534,10 +534,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.HIGH,
         languages=[".rb"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - Ruby constantize",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - Ruby constantize",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'\.constantize',
             r'\.safe_constantize',
             r'const_get\s*\(\s*params',
@@ -546,14 +546,14 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         languages=[".rb"],
     ),
 
-    # =========================================================================
-    # CODE INJECTION - Java
-    # =========================================================================
-    
-    VulnerabilityPattern(
-        name="Command Injection - Java Runtime.exec",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            # =========================================================================
+            # CODE INJECTION - Java
+            # =========================================================================
+
+            VulnerabilityPattern(
+            name="Command Injection - Java Runtime.exec",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'Runtime\.getRuntime\s*\(\s*\)\.exec\s*\(',
             r'\.exec\s*\(\s*.*request\.getParameter',
             r'\.exec\s*\(\s*.*\+',
@@ -563,10 +563,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.CRITICAL,
         languages=[".java", ".kt", ".scala"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - Java ScriptEngine",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - Java ScriptEngine",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'ScriptEngine.*eval\s*\(',
             r'\.eval\s*\(\s*.*request\.getParameter',
             r'ScriptEngineManager\s*\(',
@@ -577,10 +577,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.CRITICAL,
         languages=[".java", ".kt", ".scala"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - Java Reflection",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - Java Reflection",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'Class\.forName\s*\(\s*.*request',
             r'\.newInstance\s*\(\s*\)',
             r'Method\.invoke\s*\(',
@@ -591,10 +591,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.HIGH,
         languages=[".java", ".kt", ".scala"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - Java JNDI",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - Java JNDI",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'InitialContext\s*\(\s*\)',
             r'\.lookup\s*\(\s*.*request',
             r'\.lookup\s*\(\s*["\'].*\$\{',
@@ -604,10 +604,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.CRITICAL,
         languages=[".java", ".kt", ".scala"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - Java Expression Language",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - Java Expression Language",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'ExpressionFactory',
             r'\.createValueExpression\s*\(',
             r'ELProcessor',
@@ -619,14 +619,14 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         languages=[".java", ".kt", ".scala"],
     ),
 
-    # =========================================================================
-    # CODE INJECTION - C#/.NET
-    # =========================================================================
-    
-    VulnerabilityPattern(
-        name="Command Injection - C# Process.Start",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            # =========================================================================
+            # CODE INJECTION - C#/.NET
+            # =========================================================================
+
+            VulnerabilityPattern(
+            name="Command Injection - C# Process.Start",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'Process\.Start\s*\(',
             r'new\s+Process\s*\(',
             r'ProcessStartInfo\s*\(',
@@ -637,10 +637,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.CRITICAL,
         languages=[".cs"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - C# Dynamic Compilation",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - C# Dynamic Compilation",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'CSharpCodeProvider\s*\(',
             r'CompileAssemblyFromSource\s*\(',
             r'Microsoft\.CSharp\.CSharpCodeProvider',
@@ -651,10 +651,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.CRITICAL,
         languages=[".cs"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - C# Assembly Loading",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - C# Assembly Loading",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'Assembly\.Load\s*\(',
             r'Assembly\.LoadFrom\s*\(',
             r'Assembly\.LoadFile\s*\(',
@@ -665,10 +665,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.HIGH,
         languages=[".cs"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - C# Reflection",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - C# Reflection",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'Type\.GetType\s*\(\s*.*Request',
             r'\.InvokeMember\s*\(',
             r'MethodInfo\.Invoke\s*\(',
@@ -679,10 +679,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.HIGH,
         languages=[".cs"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - C# PowerShell",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - C# PowerShell",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'PowerShell\.Create\s*\(',
             r'\.AddScript\s*\(',
             r'\.AddCommand\s*\(',
@@ -692,10 +692,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.CRITICAL,
         languages=[".cs"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - C# Expression Trees",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - C# Expression Trees",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'Expression\.Lambda',
             r'\.Compile\s*\(\s*\)',
             r'DynamicExpression',
@@ -705,14 +705,14 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         languages=[".cs"],
     ),
 
-    # =========================================================================
-    # CODE INJECTION - Go
-    # =========================================================================
-    
-    VulnerabilityPattern(
-        name="Command Injection - Go exec.Command",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            # =========================================================================
+            # CODE INJECTION - Go
+            # =========================================================================
+
+            VulnerabilityPattern(
+            name="Command Injection - Go exec.Command",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'exec\.Command\s*\(',
             r'exec\.CommandContext\s*\(',
             r'syscall\.Exec\s*\(',
@@ -722,10 +722,10 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         severity=Severity.HIGH,
         languages=[".go"],
     ),
-    VulnerabilityPattern(
-        name="Code Injection - Go plugin",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Code Injection - Go plugin",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'plugin\.Open\s*\(',
             r'\.Lookup\s*\(',
         ],
@@ -733,14 +733,14 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         languages=[".go"],
     ),
 
-    # =========================================================================
-    # CODE INJECTION - Kotlin
-    # =========================================================================
-    
-    VulnerabilityPattern(
-        name="Command Injection - Kotlin ProcessBuilder",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            # =========================================================================
+            # CODE INJECTION - Kotlin
+            # =========================================================================
+
+            VulnerabilityPattern(
+            name="Command Injection - Kotlin ProcessBuilder",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'ProcessBuilder\s*\(',
             r'Runtime\.getRuntime\s*\(\s*\)\.exec',
             r'\.exec\s*\(\s*.*request',
@@ -749,14 +749,14 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         languages=[".kt"],
     ),
 
-    # =========================================================================
-    # CODE INJECTION - Shell/Bash
-    # =========================================================================
-    
-    VulnerabilityPattern(
-        name="Command Injection - Shell eval",
-        category=VulnCategory.CODE_INJECTION,
-        patterns=[
+            # =========================================================================
+            # CODE INJECTION - Shell/Bash
+            # =========================================================================
+
+            VulnerabilityPattern(
+            name="Command Injection - Shell eval",
+            category=VulnCategory.CODE_INJECTION,
+            patterns=[
             r'\beval\s+',
             r'\beval\s*\$',
             r'`.*\$',
@@ -766,14 +766,14 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         languages=[".sh", ".bash", ".zsh"],
     ),
 
-    # =========================================================================
-    # PROTOTYPE POLLUTION PATTERNS
-    # =========================================================================
-    
-    VulnerabilityPattern(
-        name="Prototype Pollution - __proto__ Access",
-        category=VulnCategory.PROTOTYPE_POLLUTION,
-        patterns=[
+            # =========================================================================
+            # PROTOTYPE POLLUTION PATTERNS
+            # =========================================================================
+
+            VulnerabilityPattern(
+            name="Prototype Pollution - __proto__ Access",
+            category=VulnCategory.PROTOTYPE_POLLUTION,
+            patterns=[
             r'\[.*__proto__.*\]\s*=',
             r'\.__proto__\s*=',
             r'\["__proto__"\]\s*=',
@@ -782,12 +782,12 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         ],
         severity=Severity.CRITICAL,
         languages=[".js", ".ts", ".jsx", ".tsx"],
-        false_positive_patterns=[r'hasOwnProperty.*__proto__', r'===\s*["\']__proto__["\']', r'!==\s*["\']__proto__["\']', r'typeof superClass', r'Object\.getPrototypeOf', r'Object\.create\('],
+    false_positive_patterns=[r'hasOwnProperty.*__proto__', r'===\s*["\']__proto__["\']', r'!==\s*["\']__proto__["\']', r'typeof superClass', r'Object\.getPrototypeOf', r'Object\.create\('],
     ),
-    VulnerabilityPattern(
-        name="Prototype Pollution - constructor.prototype",
-        category=VulnCategory.PROTOTYPE_POLLUTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Prototype Pollution - constructor.prototype",
+            category=VulnCategory.PROTOTYPE_POLLUTION,
+            patterns=[
             r'\[.*constructor.*\]\s*\[.*prototype.*\]\s*=',
             r'\.constructor\.prototype\s*=',
             r'\["constructor"\]\s*\["prototype"\]\s*=',
@@ -795,12 +795,12 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         ],
         severity=Severity.CRITICAL,
         languages=[".js", ".ts", ".jsx", ".tsx"],
-        false_positive_patterns=[r'Object\.create\(', r'typeof superClass', r'_inherits'],
+    false_positive_patterns=[r'Object\.create\(', r'typeof superClass', r'_inherits'],
     ),
-    VulnerabilityPattern(
-        name="Prototype Pollution - Unsafe Deep Merge",
-        category=VulnCategory.PROTOTYPE_POLLUTION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Prototype Pollution - Unsafe Deep Merge",
+            category=VulnCategory.PROTOTYPE_POLLUTION,
+            patterns=[
             r'_\.merge\s*\(\s*[^,]+,\s*req\.',
             r'_\.defaultsDeep\s*\(\s*[^,]+,\s*req\.',
             r'lodash\.merge\s*\(\s*[^,]+,\s*req\.',
@@ -813,56 +813,56 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         languages=[".js", ".ts", ".jsx", ".tsx"],
     ),
 
-    # =========================================================================
-    # SQL INJECTION PATTERNS
-    # =========================================================================
-    
-    VulnerabilityPattern(
-    name="SQL Injection - String Concatenation",
-    category=VulnCategory.SQL_INJECTION,
-    patterns=[
-        # Basic SQL statement concatenation
-        r'["\']SELECT\s+.+\s+FROM\s+.+["\']\s*\+',
-        r'["\']INSERT\s+INTO\s+.+["\']\s*\+',
-        r'["\']UPDATE\s+.+\s+SET\s+.+["\']\s*\+',
-        r'["\']DELETE\s+FROM\s+.+["\']\s*\+',
-        r'["\']DROP\s+.+["\']\s*\+',
-        
-        # WHERE clause concatenation (common injection point)
-        r'["\'].*WHERE\s+.+["\']\s*\+\s*(?!["\']\s*AND\s*["\'])',
-        r'["\'].*AND\s+.+["\']\s*\+',
-        r'["\'].*OR\s+.+["\']\s*\+',
-        
-        # ORDER BY / GROUP BY injection
-        r'["\'].*ORDER\s+BY\s*["\']\s*\+',
-        r'["\'].*GROUP\s+BY\s*["\']\s*\+',
-        r'["\'].*HAVING\s+.+["\']\s*\+',
-        
-        # LIMIT/OFFSET injection
-        r'["\'].*LIMIT\s*["\']\s*\+',
-        r'["\'].*OFFSET\s*["\']\s*\+',
-        
-        # Table/Column name injection
-        r'["\']SELECT\s+["\']\s*\+\s*\w+\s*\+\s*["\']',
-        r'["\']FROM\s+["\']\s*\+',
-        r'["\']INTO\s+["\']\s*\+',
-        
-        # Execute methods with concatenation
-        r'executeQuery\s*\(\s*["\'].*\+',
-        r'executeUpdate\s*\(\s*["\'].*\+',
-        r'executeSql\s*\(\s*["\'].*\+',
-        r'execute\s*\(\s*["\'].*SELECT.*\+',
-    ],
-    severity=Severity.CRITICAL,
-    languages=[".js", ".ts", ".jsx", ".tsx", ".py", ".php", ".java", ".cs", ".rb", ".go", ".kt"],
+            # =========================================================================
+            # SQL INJECTION PATTERNS
+            # =========================================================================
+
+            VulnerabilityPattern(
+            name="SQL Injection - String Concatenation",
+            category=VulnCategory.SQL_INJECTION,
+            patterns=[
+            # Basic SQL statement concatenation
+            r'["\']SELECT\s+.+\s+FROM\s+.+["\']\s*\+',
+            r'["\']INSERT\s+INTO\s+.+["\']\s*\+',
+            r'["\']UPDATE\s+.+\s+SET\s+.+["\']\s*\+',
+            r'["\']DELETE\s+FROM\s+.+["\']\s*\+',
+            r'["\']DROP\s+.+["\']\s*\+',
+
+            # WHERE clause concatenation (common injection point)
+            r'["\'].*WHERE\s+.+["\']\s*\+\s*(?!["\']\s*AND\s*["\'])',
+            r'["\'].*AND\s+.+["\']\s*\+',
+            r'["\'].*OR\s+.+["\']\s*\+',
+
+            # ORDER BY / GROUP BY injection
+            r'["\'].*ORDER\s+BY\s*["\']\s*\+',
+            r'["\'].*GROUP\s+BY\s*["\']\s*\+',
+            r'["\'].*HAVING\s+.+["\']\s*\+',
+
+            # LIMIT/OFFSET injection
+            r'["\'].*LIMIT\s*["\']\s*\+',
+            r'["\'].*OFFSET\s*["\']\s*\+',
+
+            # Table/Column name injection
+            r'["\']SELECT\s+["\']\s*\+\s*\w+\s*\+\s*["\']',
+            r'["\']FROM\s+["\']\s*\+',
+            r'["\']INTO\s+["\']\s*\+',
+
+            # Execute methods with concatenation
+            r'executeQuery\s*\(\s*["\'].*\+',
+            r'executeUpdate\s*\(\s*["\'].*\+',
+            r'executeSql\s*\(\s*["\'].*\+',
+            r'execute\s*\(\s*["\'].*SELECT.*\+',
+        ],
+        severity=Severity.CRITICAL,
+        languages=[".js", ".ts", ".jsx", ".tsx", ".py", ".php", ".java", ".cs", ".rb", ".go", ".kt"],
     false_positive_patterns=[
-        r'//.*SELECT',
-        r'#.*SELECT',
-        r'PreparedStatement',
-        r'\+\s*["\']["\']',           # Empty string concat
-        r'\+\s*["\'][\s,)]+["\']',    # Whitespace/punctuation only
-    ],
-),
+            r'//.*SELECT',
+            r'#.*SELECT',
+            r'PreparedStatement',
+            r'\+\s*["\']["\']',           # Empty string concat
+            r'\+\s*["\'][\s,)]+["\']',    # Whitespace/punctuation only
+        ],
+    ),
 
 VulnerabilityPattern(
     name="SQL Injection - Template Literals/F-strings",
@@ -876,7 +876,7 @@ VulnerabilityPattern(
         r'`.*WHERE\s+.+\$\{',
         r'`.*ORDER\s+BY\s+\$\{',
         r'`.*LIMIT\s+\$\{',
-        
+
         # Python f-strings
         r'f["\']SELECT\s+.+\{',
         r'f["\']INSERT\s+.+\{',
@@ -884,21 +884,21 @@ VulnerabilityPattern(
         r'f["\']DELETE\s+.+\{',
         r'f["\'].*WHERE\s+.+\{',
         r'f["\'].*ORDER\s+BY\s+\{',
-        
+
         # C# interpolated strings
         r'\$"SELECT\s+.+\{',
         r'\$"INSERT\s+.+\{',
         r'\$"UPDATE\s+.+\{',
         r'\$"DELETE\s+.+\{',
         r'\$".*WHERE\s+.+\{',
-        
+
         # Ruby string interpolation
         r'["\']SELECT\s+.+#\{',
         r'["\'].*WHERE\s+.+#\{',
     ],
     severity=Severity.CRITICAL,
     languages=[".js", ".ts", ".jsx", ".tsx", ".py", ".cs", ".rb"],
-    false_positive_patterns=[
+        false_positive_patterns=[
         r'\{[\d:,]+\}',               # Format specifiers like {0}, {:d}
         r'\{\s*\?\s*\}',              # Placeholder pattern
     ],
@@ -913,27 +913,27 @@ VulnerabilityPattern(
         r'["\'].*WHERE\s+.+%s.*["\'].*%\s*\(',
         r'["\']SELECT\s+.+["\']\.format\s*\(',
         r'["\'].*WHERE\s+.+["\']\.format\s*\(',
-        
+
         # C# String.Format
         r'String\.Format\s*\(\s*["\']SELECT',
         r'string\.Format\s*\(\s*["\']SELECT',
         r'String\.Format\s*\(\s*["\'].*WHERE',
-        
+
         # Go fmt.Sprintf
         r'fmt\.Sprintf\s*\(\s*["\']SELECT',
         r'fmt\.Sprintf\s*\(\s*["\'].*WHERE',
         r'fmt\.Sprintf\s*\(\s*`SELECT',
-        
+
         # C sprintf
         r'sprintf\s*\(\s*\w+,\s*["\']SELECT',
         r'snprintf\s*\(\s*\w+,\s*\d+,\s*["\']SELECT',
-        
+
         # Java String.format
         r'String\.format\s*\(\s*["\']SELECT',
     ],
     severity=Severity.CRITICAL,
     languages=[".py", ".php", ".go", ".cs", ".java", ".c", ".cpp"],
-    false_positive_patterns=[
+        false_positive_patterns=[
         r'%\(\w+\)s',                 # Python named parameters
     ],
 ),
@@ -949,13 +949,13 @@ VulnerabilityPattern(
         r'sequelize\.query\s*\(\s*`[^`]*\$\{',
         r'knex\.raw\s*\(\s*["\'].*\+',
         r'knex\.raw\s*\(\s*`[^`]*\$\{',
-        
+
         # Prisma
         r'prisma\.\$queryRaw\s*`[^`]*\$\{',
         r'prisma\.\$executeRaw\s*`[^`]*\$\{',
         r'prisma\.\$queryRawUnsafe\s*\(',
         r'prisma\.\$executeRawUnsafe\s*\(',
-        
+
         # Python SQLAlchemy
         r'text\s*\(\s*f["\']',
         r'\.execute\s*\(\s*f["\']SELECT',
@@ -963,18 +963,18 @@ VulnerabilityPattern(
         r'engine\.execute\s*\(\s*f["\']',
         r'session\.execute\s*\(\s*f["\']',
         r'connection\.execute\s*\(\s*f["\']',
-        
+
         # Django
         r'\.extra\s*\(\s*where\s*=',
         r'\.extra\s*\(\s*select\s*=',
         r'RawSQL\s*\(\s*f["\']',
         r'cursor\.execute\s*\(\s*f["\']',
-        
+
         # Ruby ActiveRecord
         r'\.find_by_sql\s*\(\s*["\'].*#\{',
         r'\.execute\s*\(\s*["\'].*#\{',
         r'\.select_all\s*\(\s*["\'].*#\{',
-        
+
         # C# Entity Framework
         r'FromSqlRaw\s*\(\s*\$"',
         r'ExecuteSqlRaw\s*\(\s*\$"',
@@ -983,7 +983,7 @@ VulnerabilityPattern(
     ],
     severity=Severity.CRITICAL,
     languages=[".js", ".ts", ".py", ".cs", ".rb"],
-    false_positive_patterns=[
+        false_positive_patterns=[
         r'\?\s*[,\)]',                # Positional placeholders
         r'\$\d+',                     # PostgreSQL positional params
         r':\w+',                      # Named parameters
@@ -1003,27 +1003,27 @@ VulnerabilityPattern(
         r'["\']UPDATE\s+.+\$_(GET|POST|REQUEST|COOKIE)',
         r'["\']DELETE\s+.+\$_(GET|POST|REQUEST|COOKIE)',
         r'["\'].*WHERE\s+.+\$_(GET|POST|REQUEST|COOKIE)',
-        
+
         # Variable concatenation
         r'["\']SELECT\s+.+["\']\s*\.\s*\$(?!pdo)',
         r'["\'].*WHERE\s+.+["\']\s*\.\s*\$(?!pdo)',
-        
+
         # Deprecated mysql_* functions (always flag)
         r'mysql_query\s*\(',
         r'mysql_db_query\s*\(',
         r'mysql_unbuffered_query\s*\(',
-        
+
         # mysqli without prepared statements
         r'mysqli_query\s*\(\s*\$\w+,\s*["\'].*\$(?!stmt)',
         r'mysqli_multi_query\s*\(\s*\$\w+,\s*["\'].*\$',
-        
+
         # PDO without prepared statements
         r'\$pdo->query\s*\(\s*["\'].*\$',
         r'\$\w+->query\s*\(\s*["\'].*\.\s*\$',
     ],
     severity=Severity.CRITICAL,
     languages=[".php"],
-    false_positive_patterns=[
+        false_positive_patterns=[
         r'->prepare\s*\(',
         r'bindParam',
         r'bindValue',
@@ -1039,16 +1039,16 @@ VulnerabilityPattern(
         r'createStatement\s*\(\s*\).*executeQuery\s*\(\s*["\'].*\+',
         r'createStatement\s*\(\s*\).*executeUpdate\s*\(\s*["\'].*\+',
         r'createStatement\s*\(\s*\).*execute\s*\(\s*["\'].*\+',
-        
+
         # String building with SQL
         r'StringBuilder.*append\s*\(\s*["\']SELECT',
         r'StringBuffer.*append\s*\(\s*["\']SELECT',
         r'String\.join.*SELECT',
-        
+
         # Statement.execute with concatenation
         r'statement\.execute\w*\s*\(\s*["\'].*\+',
         r'stmt\.execute\w*\s*\(\s*["\'].*\+',
-        
+
         # Spring JDBC without parameters
         r'jdbcTemplate\.query\s*\(\s*["\'].*\+',
         r'jdbcTemplate\.update\s*\(\s*["\'].*\+',
@@ -1057,7 +1057,7 @@ VulnerabilityPattern(
     ],
     severity=Severity.CRITICAL,
     languages=[".java", ".kt"],
-    false_positive_patterns=[
+        false_positive_patterns=[
         r'PreparedStatement',
         r'prepareStatement',
         r'\?\s*[,\)]',
@@ -1076,16 +1076,16 @@ VulnerabilityPattern(
         r'cur\.execute\s*\(\s*f["\']',
         r'\.execute\s*\(\s*f["\']SELECT',
         r'\.execute\s*\(\s*f["\'].*WHERE',
-        
+
         # String formatting in execute
         r'\.execute\s*\(\s*["\'].*%s.*["\'].*%\s*\(',
         r'\.execute\s*\(\s*["\'].*["\']\.format\s*\(',
         r'\.executemany\s*\(\s*f["\']',
-        
+
         # psycopg2 / mysql-connector specific
         r'cursor\.execute\s*\(\s*["\'].*%\s*\(',
         r'cursor\.execute\s*\(\s*["\'].*["\']\.format',
-        
+
         # asyncpg
         r'connection\.fetch\s*\(\s*f["\']',
         r'connection\.execute\s*\(\s*f["\']',
@@ -1093,7 +1093,7 @@ VulnerabilityPattern(
     ],
     severity=Severity.CRITICAL,
     languages=[".py"],
-    false_positive_patterns=[
+        false_positive_patterns=[
         r'execute\s*\(\s*["\'][^"\']*["\'],\s*[\[\(]',   # Parameterized query
         r'execute\s*\(\s*["\'][^"\']*["\'],\s*\{',       # Dict params
         r'%\(\w+\)s',                                      # Named params
@@ -1111,22 +1111,22 @@ VulnerabilityPattern(
         r'db\.Exec\s*\(\s*fmt\.Sprintf\s*\(',
         r'tx\.Query\s*\(\s*fmt\.Sprintf\s*\(',
         r'tx\.Exec\s*\(\s*fmt\.Sprintf\s*\(',
-        
+
         # String concatenation
         r'db\.Query\s*\(\s*["`].*\+',
         r'db\.Exec\s*\(\s*["`].*\+',
-        
+
         # GORM raw queries
         r'\.Raw\s*\(\s*fmt\.Sprintf',
         r'\.Exec\s*\(\s*fmt\.Sprintf',
-        
+
         # sqlx
         r'sqlx\.Get\s*\(.*fmt\.Sprintf',
         r'sqlx\.Select\s*\(.*fmt\.Sprintf',
     ],
     severity=Severity.CRITICAL,
     languages=[".go"],
-    false_positive_patterns=[
+        false_positive_patterns=[
         r'\$\d+',                      # PostgreSQL params
         r'\?\s*[,\)]',                 # MySQL params
         r'\.Rebind\s*\(',              # sqlx rebind
@@ -1147,18 +1147,18 @@ VulnerabilityPattern(
         r'SqlCommand\s*\(\s*\$"',
         r'CommandText\s*=\s*\$"',
         r'CommandText\s*=\s*["\'].*\+',
-        
+
         # OleDb/Odbc
         r'new\s+OleDbCommand\s*\(\s*\$"',
         r'new\s+OdbcCommand\s*\(\s*\$"',
-        
+
         # SqlDataAdapter
         r'new\s+SqlDataAdapter\s*\(\s*\$"',
         r'new\s+SqlDataAdapter\s*\(\s*["\'].*\+',
     ],
     severity=Severity.CRITICAL,
     languages=[".cs"],
-    false_positive_patterns=[
+        false_positive_patterns=[
         r'@\w+',                       # SQL Server parameters
         r'Parameters\.Add',
         r'Parameters\.AddWithValue',
@@ -1177,13 +1177,13 @@ VulnerabilityPattern(
         r'\.ExecuteSqlRaw\s*\(\s*["\'].*\+',
         r'\.SqlQuery\s*\(\s*\$"',
         r'Database\.ExecuteSqlCommand\s*\(\s*\$"',
-        
+
         # EF Core interpolated (safer but flag for review)
         r'\.FromSqlInterpolated\s*\(\s*\$".*\+',
     ],
     severity=Severity.CRITICAL,
     languages=[".cs"],
-    false_positive_patterns=[
+        false_positive_patterns=[
         r'FromSqlInterpolated',        # EF Core handles this safely
         r'@\w+',
     ],
@@ -1203,7 +1203,7 @@ VulnerabilityPattern(
     ],
     severity=Severity.CRITICAL,
     languages=[".cs"],
-    false_positive_patterns=[
+        false_positive_patterns=[
         r'@\w+',
         r',\s*new\s*\{',               # Anonymous object params
     ],
@@ -1223,7 +1223,7 @@ VulnerabilityPattern(
         r'\.execute\s*\(\s*record\.',
         r'executeQuery\s*\(\s*rs\.getString',
         r'executeQuery\s*\(\s*resultSet\.get',
-        
+
         # Using session/cookie data in queries
         r'["\']SELECT.*session\[',
         r'["\']SELECT.*Session\[',
@@ -1231,73 +1231,73 @@ VulnerabilityPattern(
     ],
     severity=Severity.HIGH,
     languages=[".js", ".ts", ".py", ".php", ".java", ".cs", ".rb", ".go"],
-),
+        ),
 
-# =========================================================================
-# POSTGRESQL SPECIFIC INJECTION
-# =========================================================================
+        # =========================================================================
+        # POSTGRESQL SPECIFIC INJECTION
+        # =========================================================================
 
-VulnerabilityPattern(
-    name="PostgreSQL Injection - Dangerous Functions",
-    category=VulnCategory.SQL_INJECTION,
-    patterns=[
+        VulnerabilityPattern(
+        name="PostgreSQL Injection - Dangerous Functions",
+        category=VulnCategory.SQL_INJECTION,
+        patterns=[
         # File system access
         r'pg_read_file\s*\(',
         r'pg_read_binary_file\s*\(',
         r'pg_ls_dir\s*\(',
         r'pg_stat_file\s*\(',
-        
+
         # Large object operations
         r'lo_import\s*\(',
         r'lo_export\s*\(',
-        
+
         # COPY command with variables
         r'COPY\s+.+\s+FROM\s+.+[\$\{#]',
         r'COPY\s+.+\s+TO\s+.+[\$\{#]',
-        
+
         # Code execution
         r'CREATE\s+FUNCTION.*LANGUAGE\s+(plpython|plperl|pltcl)',
     ],
     severity=Severity.CRITICAL,
     languages=[".js", ".ts", ".py", ".php", ".java", ".cs", ".rb", ".go"],
-),
+        ),
 
-# =========================================================================
-# ORM-SPECIFIC UNSAFE PATTERNS
-# =========================================================================
+        # =========================================================================
+        # ORM-SPECIFIC UNSAFE PATTERNS
+        # =========================================================================
 
-VulnerabilityPattern(
-    name="SQL Injection - ORM Bypass/Unsafe Methods",
-    category=VulnCategory.SQL_INJECTION,
-    patterns=[
+        VulnerabilityPattern(
+        name="SQL Injection - ORM Bypass/Unsafe Methods",
+        category=VulnCategory.SQL_INJECTION,
+        patterns=[
         # Django
         r'\.extra\s*\(\s*where\s*=\s*\[.*%',
         r'\.extra\s*\(\s*select\s*=\s*\{.*%',
         r'RawSQL\s*\(',
-        
+
         # SQLAlchemy
         r'text\s*\(\s*["\'].*%',
         r'text\s*\(\s*f["\']',
         r'literal_column\s*\(\s*f["\']',
-        
+
         # Sequelize
         r'sequelize\.literal\s*\(\s*["\'].*\+',
         r'sequelize\.literal\s*\(\s*`.*\$\{',
         r'Sequelize\.literal\s*\(\s*["\'].*\+',
-        
+
         # ActiveRecord
         r'\.where\s*\(\s*["\'].*#\{',
         r'\.order\s*\(\s*["\'].*#\{',
         r'\.pluck\s*\(\s*["\'].*#\{',
         r'\.group\s*\(\s*["\'].*#\{',
-        
+
         # Hibernate HQL
         r'createQuery\s*\(\s*["\'].*\+',
         r'createNativeQuery\s*\(\s*["\'].*\+',
     ],
     severity=Severity.HIGH,
     languages=[".py", ".js", ".ts", ".rb", ".java", ".kt"],
-    false_positive_patterns=[
+        false_positive_patterns=[
         r':\w+',                       # Named parameters
         r'\?\s*[,\)]',
     ],
@@ -1305,60 +1305,234 @@ VulnerabilityPattern(
     # =========================================================================
     # NOSQL INJECTION PATTERNS
     # =========================================================================
+    # =========================================================================
+# NOSQL INJECTION PATTERNS - IMPROVED
+# =========================================================================
 
-    VulnerabilityPattern(
+VulnerabilityPattern(
     name="NoSQL Injection - Tainted Input in Query",
     category=VulnCategory.NOSQL_INJECTION,
     patterns=[
+        # =====================================================================
+        # JAVASCRIPT/TYPESCRIPT - Express.js patterns
+        # =====================================================================
+
         # Catches: .find({ user: req.query.name }), .findOne({ email: req.body.email })
-        r'\.(find|findOne|update|delete|aggregate|count|distinct|findOneAnd(?:Update|Delete|Replace))\w*\s*\(\s*\{[^}]*:\s*req\.(body|query|params)',
-        
+        r'\.(find|findOne|findMany|update|updateOne|updateMany|delete|deleteOne|deleteMany|'
+        r'aggregate|count|countDocuments|distinct|findOneAnd(?:Update|Delete|Replace|Remove)|'
+        r'replaceOne|bulkWrite)\s*\(\s*\{[^}]*:\s*req\.(body|query|params|cookies|headers)',
+
         # Catches: .find(req.body), .findOne(req.query) - passing raw user input as query
-        r'\.(find|findOne|countDocuments|aggregate|distinct)\s*\(\s*req\.(body|query)\s*\)',
-        
+        r'\.(find|findOne|findMany|countDocuments|aggregate|distinct|watch)\s*\(\s*req\.(body|query|params)\s*[,\)]',
+
         # Catches: .find({ ...req.body }) - object spread of user input
-        r'\.(find|findOne|update|delete|aggregate|findOneAnd)\w*\s*\(\s*\{\s*\.\.\.req\.(body|query|params)',
-        
+        r'\.(find|findOne|findMany|update|updateOne|updateMany|delete|deleteOne|deleteMany|'
+        r'aggregate|findOneAnd\w*)\s*\(\s*\{\s*\.\.\.req\.(body|query|params)',
+
         # Catches: $where with string concatenation or template literals
         r'\$where\s*:\s*[`"\'].*(\+|\$\{|req\.)',
-        
+
         # Catches: collection[method](userInput) dynamic method calls
-        r'collection\s*\[\s*req\.(body|query|params)',
-        
+        r'(?:collection|db\.\w+)\s*\[\s*req\.(body|query|params)',
+
+        # Catches: db[req.body.collection].find() - dynamic collection access
+        r'db\s*\[\s*req\.(body|query|params)',
+
         # Catches: MongoDB operators from user input: { $gt: req.body.value }
-        r'\{\s*\$(?:gt|gte|lt|lte|ne|in|nin|or|and|not|regex|where|expr)\s*:\s*req\.(body|query|params)',
-        
+        r'\{\s*\$(?:gt|gte|lt|lte|ne|eq|in|nin|or|and|not|nor|regex|where|expr|'
+        r'elemMatch|all|size|exists|type|mod|text|search)\s*:\s*req\.(body|query|params)',
+
+        # Catches: Dynamic operator key from user input { [req.body.op]: value }
+        r'\{\s*\[\s*req\.(body|query|params)',
+
         # Catches: eval-like patterns in Mongoose/MongoDB
         r'\.(?:mapReduce|group)\s*\(\s*[^)]*req\.(body|query|params)',
+
+        # Catches: Variable-based taint (common variable names for user input)
+        r'\.(find|findOne|findMany|aggregate|update\w*|delete\w*)\s*\(\s*'
+        r'(userInput|queryObj|filterObj|searchQuery|userQuery|clientData|requestBody|reqBody)\s*[,\)]',
+
+        # =====================================================================
+        # PYTHON - PyMongo / Motor patterns (THIS IS WHAT YOU WERE MISSING!)
+        # =====================================================================
+
+        # Catches: collection.find({"user": request_var}), db.users.find(query_val)
+        r'\.find\s*\(\s*\{[^}]*:\s*\w*(request|query|param|user_input|data|payload|input_)',
+
+        # Catches: db.collection.find(variable) - variable passed directly
+        r'(?:db|client|mongo|collection)\.\w+\.(?:find|find_one|update|update_one|update_many|'
+        r'delete_one|delete_many|aggregate|count_documents|distinct)\s*\(\s*'
+        r'(?![\'\"\{])([a-zA-Z_]\w*)\s*[,\)]',
+
+        # Catches: collection.find(request.args), collection.find_one(request.form)
+        r'\.(?:find|find_one|find_many|update_one|update_many|delete_one|delete_many|'
+        r'aggregate|count_documents|distinct|replace_one)\s*\(\s*'
+        r'request\.(args|form|json|values|data|get_json)',
+
+        # Catches: .find({"field": request.args.get("param")})
+        r'\.(?:find|find_one|aggregate)\s*\(\s*\{[^}]*:\s*request\.(args|form|json)',
+
+        # Catches: Flask/Django patterns - request.GET, request.POST, request.data
+        r'\.(?:find|find_one|update|delete|aggregate)\w*\s*\(\s*\{[^}]*:\s*request\.(GET|POST|data)',
+
+        # Catches: PyMongo with f-string or .format() in query (string injection)
+        r'\.(?:find|find_one|aggregate)\s*\(\s*f["\']',
+        r'\.(?:find|find_one|aggregate)\s*\(\s*["\'][^"\']*\{.*\}[^"\']*["\']\.format',
+
+        # Catches: eval/exec with mongo (very dangerous)
+        r'(?:eval|exec)\s*\([^)]*(?:find|mongo|collection)',
+
+        # =====================================================================
+        # PYTHON - Variable taint tracking (common patterns)
+        # =====================================================================
+
+        # Catches: query_val used in .find() - tracks common variable naming
+        r'\.(?:find|find_one|aggregate|update_one|delete_one)\s*\(\s*'
+        r'(?:\{[^}]*:\s*)?(query_val|user_val|input_val|param_val|search_val|'
+        r'user_input|user_data|query_data|form_data|request_data|payload|'
+        r'filter_dict|query_dict|search_query|user_query)',
+
+        # Catches: Generic dict variable in find() that might be tainted
+        # This has higher false positive rate but catches: items.find({"user": query_val})
+        r'db\.\w+\.find\s*\(\s*\{[^}]*:\s*[a-z_]+_val\}?\s*\)',
+
+        # =====================================================================
+        # PHP - MongoDB patterns
+        # =====================================================================
+
+        # Catches: $collection->find(['user' => $_GET['user']])
+        r'->\s*(?:find|findOne|updateOne|deleteOne|aggregate)\s*\(\s*\[[^\]]*=>\s*\$_(GET|POST|REQUEST|COOKIE)',
+
+        # Catches: $collection->find($_POST)
+        r'->\s*(?:find|findOne|aggregate)\s*\(\s*\$_(GET|POST|REQUEST)',
+
+        # =====================================================================
+        # Ruby - Mongoid / mongo-ruby-driver patterns
+        # =====================================================================
+
+        # Catches: Model.where(params[:field])
+        r'\.(?:where|find|find_by|update|delete)\s*\(\s*params\s*\[',
+
+        # Catches: collection.find(params.permit(...).to_h)
+        r'\.find\s*\(\s*params',
+
+        # =====================================================================
+        # Java - MongoDB Java Driver patterns
+        # =====================================================================
+
+        # Catches: collection.find(Filters.eq("field", request.getParameter()))
+        r'\.find\s*\(\s*(?:Filters\.\w+\s*\([^)]*)?request\.getParameter',
+
+        # Catches: BasicDBObject with request parameter
+        r'new\s+BasicDBObject\s*\([^)]*request\.getParameter',
+
+        # Catches: Document.parse with user input
+        r'Document\.parse\s*\(\s*(?:request|param|input|user)',
     ],
     severity=Severity.CRITICAL,
-    languages=[".js", ".ts", ".jsx", ".tsx"],
-    false_positive_patterns=[
-        r'findById',                    # Mongoose casts to ObjectId
-        r'params\.id\s*\)',             # Single ID lookups are generally safe
-        r'Types\.ObjectId\s*\(',        # Explicit ObjectId casting
-        r'mongoose\.Types\.ObjectId',   # Explicit ObjectId casting
-        r'new\s+ObjectId\s*\(',         # Explicit ObjectId casting
-        r'sanitize',                    # Likely using sanitization
-        r'escape',                      # Likely using escaping
-        r'validator\.',                 # Using validator library
+    languages=[".js", ".ts", ".jsx", ".tsx", ".mjs", ".py", ".php", ".rb", ".java"],
+        false_positive_patterns=[
+        r'findById\s*\(',                           # Mongoose casts to ObjectId
+        r'params\.id\s*\)',                         # Single ID lookups are generally safe
+        r'Types\.ObjectId\s*\(',                    # Explicit ObjectId casting
+        r'mongoose\.Types\.ObjectId',               # Explicit ObjectId casting
+        r'new\s+ObjectId\s*\(',                     # Explicit ObjectId casting
+        r'ObjectId\.isValid\s*\(',                  # Validation before use
+        r'bson\.ObjectId\s*\(',                     # Python BSON ObjectId
+        r'sanitize\w*\s*\(',                        # Using sanitization
+        r'escape\w*\s*\(',                          # Using escaping
+        r'validator\.\w+',                          # Using validator library
+        r'wtforms',                                 # WTForms validation (Python)
+        r'marshmallow',                             # Marshmallow schema validation
+        r'pydantic',                                # Pydantic validation
+        r'Joi\.',                                   # Joi validation (JS)
+        r'yup\.',                                   # Yup validation (JS)
+        r'zod\.',                                   # Zod validation (JS)
+        r'express-validator',                       # Express validator
+        r'mongo-sanitize',                          # Mongo sanitize library
+        r'int\s*\(',                                # Python int casting
+        r'str\s*\(',                                # Python str casting (partial mitigation)
+        r'isinstance\s*\([^,]+,\s*(?:int|str|float)\)', # Type checking
     ],
 ),
+
 VulnerabilityPattern(
     name="NoSQL Injection - MongoDB $where Operator",
     category=VulnCategory.NOSQL_INJECTION,
     patterns=[
+        # Basic $where detection (code smell)
         r'\$where\s*:',
         r'"\$where"\s*:',
         r"'\$where'\s*:",
+
+        # $where with user input (CRITICAL)
+        r'\$where\s*:\s*[^,}]*(?:req\.|request\.|params|query|user_input|input)',
+
+        # $where with string concatenation
+        r'\$where\s*:\s*["\'][^"\']*\s*\+',
+        r'\$where\s*:\s*[`][^`]*\$\{',
+
+        # $where with f-string (Python)
+        r'\$where\s*:\s*f["\']',
+
+        # JavaScript function in $where with external variable
+        r'\$where\s*:\s*function\s*\([^)]*\)\s*\{[^}]*(?:req\.|request\.|params|this\.\w+\s*==\s*[^"\']+)',
     ],
-    severity=Severity.HIGH,  # Changed from CRITICAL - $where alone is a code smell, not always exploitable
+    severity=Severity.HIGH,
     languages=[".js", ".ts", ".jsx", ".tsx", ".py", ".php", ".java", ".rb", ".cs"],
-    false_positive_patterns=[
-        r'\$where\s*:\s*function\s*\(\)\s*\{\s*return\s+(true|false)',  # Static $where
-        r'\$where\s*:\s*["\'][^"\']*["\']',  # Hardcoded string (still risky but not injection)
+        false_positive_patterns=[
+        r'\$where\s*:\s*function\s*\(\)\s*\{\s*return\s+(true|false)\s*;?\s*\}',  # Static boolean return
+        r'\$where\s*:\s*["\']this\.\w+\s*[<>=!]+\s*\d+["\']',  # Hardcoded numeric comparison
+        r'#.*\$where',  # Commented out
+        r'//.*\$where',  # Commented out
     ],
 ),
+
+# =========================================================================
+# NEW: Additional NoSQL Pattern for Python-specific cases
+# =========================================================================
+
+VulnerabilityPattern(
+    name="NoSQL Injection - PyMongo/Motor Tainted Query",
+    category=VulnCategory.NOSQL_INJECTION,
+    patterns=[
+        # Catches the EXACT pattern from your test:
+        # client.db.items.find({"user": query_val})
+        r'(?:client|mongo|db)\.\w+\.\w+\.(?:find|find_one|aggregate|update|delete)\s*\(\s*\{[^}]*:\s*[a-z_]+(?:_val|_input|_data|_param)\s*\}',
+
+        # Catches: collection.find(filter_var) where filter comes from request
+        r'\.(?:find|find_one|aggregate)\s*\(\s*(?:[a-z_]+(?:filter|query|search|param|input|data))\s*[,\)]',
+
+        # Flask specific: request.args.get(), request.form.get()
+        r'\.(?:find|find_one|aggregate|update_one|delete_one)\s*\([^)]*request\.(?:args|form|json|data)\.get\s*\(',
+
+        # Catches: {"$regex": variable} pattern
+        r'\{\s*["\']?\$(?:regex|where|expr)["\']?\s*:\s*[a-z_]\w*\s*\}',
+
+        # Catches dict unpacking: .find({**user_dict})
+        r'\.(?:find|find_one|aggregate)\s*\(\s*\{\s*\*\*\s*[a-z_]\w*\s*\}',
+
+        # Motor (async MongoDB) patterns
+        r'await\s+\w+\.(?:find|find_one|aggregate|update_one|delete_one)\s*\([^)]*request',
+
+        # Catches: json.loads() result used directly in query
+        r'\.(?:find|find_one)\s*\(\s*json\.loads\s*\(',
+    ],
+    severity=Severity.CRITICAL,
+    languages=[".py"],
+        false_positive_patterns=[
+        r'ObjectId\s*\(',
+        r'bson\.ObjectId',
+        r'isinstance\s*\(',
+        r'\.get\s*\([^)]+,\s*(?:None|default)',  # Has default value (partial)
+        r'int\s*\(\s*request',  # Casting to int
+        r'validate',
+        r'schema',
+        r'pydantic',
+        r'@validator',
+    ],
+),
+
 
     # =========================================================================
     # XPATH INJECTION PATTERNS
@@ -1381,14 +1555,14 @@ VulnerabilityPattern(
         languages=[".js", ".ts", ".py", ".php", ".java", ".cs", ".rb"],
     ),
 
-    # =========================================================================
-    # INSECURE DESERIALIZATION PATTERNS
-    # =========================================================================
+            # =========================================================================
+            # INSECURE DESERIALIZATION PATTERNS
+            # =========================================================================
 
-    VulnerabilityPattern(
-        name="Insecure Deserialization - Python pickle",
-        category=VulnCategory.DESERIALIZATION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Insecure Deserialization - Python pickle",
+            category=VulnCategory.DESERIALIZATION,
+            patterns=[
             r'pickle\.loads?\s*\(',
             r'cPickle\.loads?\s*\(',
             r'_pickle\.loads?\s*\(',
@@ -1398,24 +1572,44 @@ VulnerabilityPattern(
         ],
         severity=Severity.CRITICAL,
         languages=[".py"],
-        false_positive_patterns=[r'#.*pickle'],
+    false_positive_patterns=[r'#.*pickle'],
     ),
-    VulnerabilityPattern(
-        name="Insecure Deserialization - Python YAML",
-        category=VulnCategory.DESERIALIZATION,
-        patterns=[
-            r'yaml\.load\s*\(\s*[^,)]+\s*\)',
-            r'yaml\.unsafe_load\s*\(',
-            r'yaml\.full_load\s*\(',
+            VulnerabilityPattern(
+            name="Insecure Deserialization - Python YAML",
+            category=VulnCategory.DESERIALIZATION,
+            patterns=[
+            # PyYAML unsafe loaders
+            r'yaml\.load\s*\(\s*[^,)]+\s*\)',                    # yaml.load() without Loader
+            r'yaml\.load\s*\([^)]*Loader\s*=\s*yaml\.Loader',    # yaml.load(Loader=yaml.Loader)
+            r'yaml\.load\s*\([^)]*Loader\s*=\s*yaml\.UnsafeLoader',
+            r'yaml\.load\s*\([^)]*Loader\s*=\s*yaml\.FullLoader',
+            r'yaml\.unsafe_load\s*\(',                           # Explicitly unsafe
+            r'yaml\.full_load\s*\(',                             # Full load (unsafe)
+            r'yaml\.load_all\s*\(\s*[^,)]+\s*\)',               # load_all without Loader
+            r'yaml\.unsafe_load_all\s*\(',
+            r'yaml\.full_load_all\s*\(',
+
+            # ruamel.yaml
+            r'ruamel\.yaml\.YAML\s*\(\s*typ\s*=\s*["\']unsafe["\']',
+            r'ruamel\.yaml\.load\s*\(',
+
+            # PyYAML with user input
+            r'yaml\.load\s*\(\s*request\.',
+            r'yaml\.load\s*\(\s*f\.read\s*\(\s*\)',
+            r'yaml\.load\s*\(\s*open\s*\(',
+            r'yaml\.load\s*\(\s*.*\.(body|data|content|text)',
+
+            # Dangerous pattern: yaml.load with file from user
+            r'yaml\.load\s*\(\s*.*request\.(form|args|json|data|files)',
         ],
         severity=Severity.CRITICAL,
         languages=[".py"],
-        false_positive_patterns=[r'yaml\.safe_load', r'SafeLoader'],
+    false_positive_patterns=[r'yaml\.safe_load', r'SafeLoader'],
     ),
-    VulnerabilityPattern(
-        name="Insecure Deserialization - Node serialize",
-        category=VulnCategory.DESERIALIZATION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Insecure Deserialization - Node serialize",
+            category=VulnCategory.DESERIALIZATION,
+            patterns=[
             r'serialize\.unserialize\s*\(',
             r'require\s*\(\s*["\']node-serialize["\']\s*\)',
             r'from\s+["\']node-serialize["\']',
@@ -1423,10 +1617,10 @@ VulnerabilityPattern(
         severity=Severity.CRITICAL,
         languages=[".js", ".ts"],
     ),
-    VulnerabilityPattern(
-        name="Insecure Deserialization - PHP unserialize",
-        category=VulnCategory.DESERIALIZATION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Insecure Deserialization - PHP unserialize",
+            category=VulnCategory.DESERIALIZATION,
+            patterns=[
             r'unserialize\s*\(\s*\$',
             r'unserialize\s*\(\s*base64_decode',
             r'unserialize\s*\(\s*\$_(GET|POST|REQUEST|COOKIE)',
@@ -1434,12 +1628,12 @@ VulnerabilityPattern(
         ],
         severity=Severity.CRITICAL,
         languages=[".php"],
-        false_positive_patterns=[r'allowed_classes\s*=>\s*false'],
+    false_positive_patterns=[r'allowed_classes\s*=>\s*false'],
     ),
-    VulnerabilityPattern(
-        name="Insecure Deserialization - Java ObjectInputStream",
-        category=VulnCategory.DESERIALIZATION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Insecure Deserialization - Java ObjectInputStream",
+            category=VulnCategory.DESERIALIZATION,
+            patterns=[
             r'ObjectInputStream\s*\(',
             r'\.readObject\s*\(\s*\)',
             r'\.readUnshared\s*\(\s*\)',
@@ -1451,24 +1645,24 @@ VulnerabilityPattern(
         ],
         severity=Severity.CRITICAL,
         languages=[".java", ".kt", ".scala"],
-        false_positive_patterns=[r'ObjectInputFilter', r'SafeConstructor'],
+    false_positive_patterns=[r'ObjectInputFilter', r'SafeConstructor'],
     ),
-    VulnerabilityPattern(
-        name="Insecure Deserialization - C# BinaryFormatter",
-        category=VulnCategory.DESERIALIZATION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Insecure Deserialization - C# BinaryFormatter",
+            category=VulnCategory.DESERIALIZATION,
+            patterns=[
             r'BinaryFormatter\s*\(',
             r'new\s+BinaryFormatter\s*\(',
             r'\.Deserialize\s*\(',
         ],
         severity=Severity.CRITICAL,
         languages=[".cs"],
-        false_positive_patterns=[r'JsonSerializer\.Deserialize', r'System\.Text\.Json'],
+    false_positive_patterns=[r'JsonSerializer\.Deserialize', r'System\.Text\.Json'],
     ),
-    VulnerabilityPattern(
-        name="Insecure Deserialization - C# NetDataContractSerializer",
-        category=VulnCategory.DESERIALIZATION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Insecure Deserialization - C# NetDataContractSerializer",
+            category=VulnCategory.DESERIALIZATION,
+            patterns=[
             r'NetDataContractSerializer\s*\(',
             r'new\s+NetDataContractSerializer\s*\(',
             r'NetDataContractSerializer.*\.ReadObject\s*\(',
@@ -1476,10 +1670,10 @@ VulnerabilityPattern(
         severity=Severity.CRITICAL,
         languages=[".cs"],
     ),
-    VulnerabilityPattern(
-        name="Insecure Deserialization - C# ObjectStateFormatter",
-        category=VulnCategory.DESERIALIZATION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Insecure Deserialization - C# ObjectStateFormatter",
+            category=VulnCategory.DESERIALIZATION,
+            patterns=[
             r'ObjectStateFormatter\s*\(',
             r'new\s+ObjectStateFormatter\s*\(',
             r'ObjectStateFormatter.*\.Deserialize\s*\(',
@@ -1487,10 +1681,10 @@ VulnerabilityPattern(
         severity=Severity.CRITICAL,
         languages=[".cs"],
     ),
-    VulnerabilityPattern(
-        name="Insecure Deserialization - C# LosFormatter",
-        category=VulnCategory.DESERIALIZATION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Insecure Deserialization - C# LosFormatter",
+            category=VulnCategory.DESERIALIZATION,
+            patterns=[
             r'LosFormatter\s*\(',
             r'new\s+LosFormatter\s*\(',
             r'LosFormatter.*\.Deserialize\s*\(',
@@ -1498,10 +1692,10 @@ VulnerabilityPattern(
         severity=Severity.CRITICAL,
         languages=[".cs"],
     ),
-    VulnerabilityPattern(
-        name="Insecure Deserialization - C# SoapFormatter",
-        category=VulnCategory.DESERIALIZATION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Insecure Deserialization - C# SoapFormatter",
+            category=VulnCategory.DESERIALIZATION,
+            patterns=[
             r'SoapFormatter\s*\(',
             r'new\s+SoapFormatter\s*\(',
             r'SoapFormatter.*\.Deserialize\s*\(',
@@ -1509,10 +1703,10 @@ VulnerabilityPattern(
         severity=Severity.CRITICAL,
         languages=[".cs"],
     ),
-    VulnerabilityPattern(
-        name="Insecure Deserialization - C# JavaScriptSerializer",
-        category=VulnCategory.DESERIALIZATION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Insecure Deserialization - C# JavaScriptSerializer",
+            category=VulnCategory.DESERIALIZATION,
+            patterns=[
             r'JavaScriptSerializer\s*\(',
             r'new\s+JavaScriptSerializer\s*\(',
             r'JavaScriptSerializer.*\.Deserialize\s*\(',
@@ -1521,10 +1715,10 @@ VulnerabilityPattern(
         severity=Severity.CRITICAL,
         languages=[".cs"],
     ),
-    VulnerabilityPattern(
-        name="Insecure Deserialization - C# Json.NET (Newtonsoft)",
-        category=VulnCategory.DESERIALIZATION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Insecure Deserialization - C# Json.NET (Newtonsoft)",
+            category=VulnCategory.DESERIALIZATION,
+            patterns=[
             r'JsonConvert\.DeserializeObject\s*\(',
             r'JsonConvert\.DeserializeObject<',
             r'TypeNameHandling\s*=\s*TypeNameHandling\.(All|Auto|Objects|Arrays)',
@@ -1533,12 +1727,12 @@ VulnerabilityPattern(
         ],
         severity=Severity.HIGH,
         languages=[".cs"],
-        false_positive_patterns=[r'TypeNameHandling\.None'],
+    false_positive_patterns=[r'TypeNameHandling\.None'],
     ),
-    VulnerabilityPattern(
-        name="Insecure Deserialization - C# fastJSON",
-        category=VulnCategory.DESERIALIZATION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Insecure Deserialization - C# fastJSON",
+            category=VulnCategory.DESERIALIZATION,
+            patterns=[
             r'JSON\.ToObject\s*\(',
             r'JSON\.ToObject<',
             r'fastJSON\.JSON\.ToObject',
@@ -1546,10 +1740,10 @@ VulnerabilityPattern(
         severity=Severity.CRITICAL,
         languages=[".cs"],
     ),
-    VulnerabilityPattern(
-        name="Insecure Deserialization - C# XmlSerializer",
-        category=VulnCategory.DESERIALIZATION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Insecure Deserialization - C# XmlSerializer",
+            category=VulnCategory.DESERIALIZATION,
+            patterns=[
             r'XmlSerializer\s*\(',
             r'new\s+XmlSerializer\s*\(',
             r'XmlSerializer.*\.Deserialize\s*\(',
@@ -1559,10 +1753,10 @@ VulnerabilityPattern(
         severity=Severity.HIGH,
         languages=[".cs"],
     ),
-    VulnerabilityPattern(
-        name="Insecure Deserialization - C# YamlDotNet",
-        category=VulnCategory.DESERIALIZATION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Insecure Deserialization - C# YamlDotNet",
+            category=VulnCategory.DESERIALIZATION,
+            patterns=[
             r'Deserializer\s*\(\s*\)',
             r'new\s+Deserializer\s*\(',
             r'new\s+DeserializerBuilder\s*\(',
@@ -1571,12 +1765,12 @@ VulnerabilityPattern(
         ],
         severity=Severity.HIGH,
         languages=[".cs"],
-        false_positive_patterns=[r'System\.Text\.Json', r'JsonSerializer'],
+    false_positive_patterns=[r'System\.Text\.Json', r'JsonSerializer'],
     ),
-    VulnerabilityPattern(
-        name="Insecure Deserialization - C# DataContractSerializer",
-        category=VulnCategory.DESERIALIZATION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Insecure Deserialization - C# DataContractSerializer",
+            category=VulnCategory.DESERIALIZATION,
+            patterns=[
             r'DataContractSerializer\s*\(',
             r'new\s+DataContractSerializer\s*\(',
             r'DataContractSerializer.*\.ReadObject\s*\(',
@@ -1586,10 +1780,10 @@ VulnerabilityPattern(
         severity=Severity.HIGH,
         languages=[".cs"],
     ),
-    VulnerabilityPattern(
-        name="Insecure Deserialization - C# XAML",
-        category=VulnCategory.DESERIALIZATION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Insecure Deserialization - C# XAML",
+            category=VulnCategory.DESERIALIZATION,
+            patterns=[
             r'XamlReader\.Load\s*\(',
             r'XamlReader\.Parse\s*\(',
             r'XamlServices\.Load\s*\(',
@@ -1598,10 +1792,10 @@ VulnerabilityPattern(
         severity=Severity.CRITICAL,
         languages=[".cs"],
     ),
-    VulnerabilityPattern(
-        name="Insecure Deserialization - C# ResourceReader",
-        category=VulnCategory.DESERIALIZATION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Insecure Deserialization - C# ResourceReader",
+            category=VulnCategory.DESERIALIZATION,
+            patterns=[
             r'ResourceReader\s*\(',
             r'new\s+ResourceReader\s*\(',
             r'ResXResourceReader\s*\(',
@@ -1609,10 +1803,10 @@ VulnerabilityPattern(
         severity=Severity.HIGH,
         languages=[".cs"],
     ),
-    VulnerabilityPattern(
-        name="Insecure Deserialization - Ruby Marshal/YAML",
-        category=VulnCategory.DESERIALIZATION,
-        patterns=[
+            VulnerabilityPattern(
+            name="Insecure Deserialization - Ruby Marshal/YAML",
+            category=VulnCategory.DESERIALIZATION,
+            patterns=[
             r'Marshal\.load\s*\(',
             r'Marshal\.restore\s*\(',
             r'YAML\.load\s*\(',
@@ -1621,82 +1815,82 @@ VulnerabilityPattern(
         ],
         severity=Severity.CRITICAL,
         languages=[".rb"],
-        false_positive_patterns=[r'YAML\.safe_load', r'Psych\.safe_load'],
+    false_positive_patterns=[r'YAML\.safe_load', r'Psych\.safe_load'],
     ),
 
-    # =========================================================================
-    # AUTHENTICATION BYPASS PATTERNS
-    # =========================================================================
+            # =========================================================================
+            # AUTHENTICATION BYPASS PATTERNS
+            # =========================================================================
 
-    VulnerabilityPattern(
-        name="Auth Bypass - Hardcoded Credentials",
-        category=VulnCategory.AUTH_BYPASS,
-        patterns = [
-    # Original patterns
-    r'password\s*[=:]\s*["\'][^"\']{4,}["\']',
-    r'passwd\s*[=:]\s*["\'][^"\']{4,}["\']',
-    r'pwd\s*[=:]\s*["\'][^"\']{4,}["\']',
-    r'secret\s*[=:]\s*["\'][^"\']{8,}["\']',
-    r'api[_-]?key\s*[=:]\s*["\'][a-zA-Z0-9]{16,}["\']',
-    r'apikey\s*[=:]\s*["\'][a-zA-Z0-9]{16,}["\']',
-    r'auth[_-]?token\s*[=:]\s*["\'][a-zA-Z0-9]{16,}["\']',
-    r'access[_-]?token\s*[=:]\s*["\'][a-zA-Z0-9]{16,}["\']',
-    r'private[_-]?key\s*[=:]\s*["\']',
-    r'connectionString\s*[=:]\s*["\'].*Password',
-    r'ConnectionString\s*=\s*["\'].*Password',
-    
-    # 1. AWS Keys
-    r'AKIA[0-9A-Z]{16}',  # AWS Access Key ID
-    r'aws[_-]?secret[_-]?access[_-]?key\s*[=:]\s*["\'][A-Za-z0-9/+=]{40}["\']',
-    r'AWS_SECRET_ACCESS_KEY\s*[=:]\s*["\'][A-Za-z0-9/+=]{40}["\']',
-    
-    # 2. Database Connection Strings
-    r'mongodb(\+srv)?://[^\s"\']+:[^\s"\']+@[^\s"\']+',  # MongoDB URI with creds
-    r'postgres(ql)?://[^\s"\']+:[^\s"\']+@[^\s"\']+',    # PostgreSQL URI with creds
-    r'mysql://[^\s"\']+:[^\s"\']+@[^\s"\']+',            # MySQL URI with creds
-    r'redis://[^\s"\']+:[^\s"\']+@[^\s"\']+',            # Redis URI with creds
-    
-    # 3. Payment & SaaS API Keys
-    r'sk_live_[a-zA-Z0-9]{24,}',           # Stripe live secret key
-    r'sk_test_[a-zA-Z0-9]{24,}',           # Stripe test secret key
-    r'rk_live_[a-zA-Z0-9]{24,}',           # Stripe restricted key
-    r'https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[a-zA-Z0-9]+',  # Slack webhook
-    r'xox[baprs]-[0-9a-zA-Z-]+',           # Slack tokens
-    
-    # 4. Session/App Secrets (generic high-entropy strings)
-    r'SESSION_SECRET\s*[=:]\s*["\'][^"\']{16,}["\']',
-    r'APP_SECRET\s*[=:]\s*["\'][^"\']{16,}["\']',
-    r'JWT_SECRET\s*[=:]\s*["\'][^"\']{16,}["\']',
-    
-    # 5. Common variable names with values
-    r'admin[_-]?password\s*[=:]\s*["\'][^"\']{4,}["\']',
-    r'api[_-]?token\s*[=:]\s*["\'][^"\']{16,}["\']',
-    r'bearer[_-]?token\s*[=:]\s*["\'][^"\']{16,}["\']',
-    
-    # 6. SSH/PGP Private Keys
-    r'-----BEGIN\s+(RSA|DSA|EC|OPENSSH|PGP)\s+PRIVATE\s+KEY-----',
-    r'-----BEGIN\s+PRIVATE\s+KEY-----',
-    
-    # 7. Basic Auth Headers
-    r'Basic\s+[A-Za-z0-9+/=]{10,}',        # Base64 encoded Basic auth
-    r'Bearer\s+[A-Za-z0-9._-]{20,}',       # Bearer tokens
-    
-    # 8. Additional cloud providers
-    r'AZURE[_-]?(?:CLIENT|TENANT|SUBSCRIPTION)[_-]?(?:ID|SECRET)\s*[=:]\s*["\'][^"\']+["\']',
-    r'GOOGLE[_-]?(?:API[_-]?KEY|CLIENT[_-]?SECRET)\s*[=:]\s*["\'][^"\']+["\']',
-    r'gh[pousr]_[A-Za-z0-9_]{36,}',        # GitHub tokens
-    
-    # 9. JWT tokens (full format)
-    r'eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*',
-],
+            VulnerabilityPattern(
+            name="Auth Bypass - Hardcoded Credentials",
+            category=VulnCategory.AUTH_BYPASS,
+            patterns = [
+            # Original patterns
+            r'password\s*[=:]\s*["\'][^"\']{4,}["\']',
+            r'passwd\s*[=:]\s*["\'][^"\']{4,}["\']',
+            r'pwd\s*[=:]\s*["\'][^"\']{4,}["\']',
+            r'secret\s*[=:]\s*["\'][^"\']{8,}["\']',
+            r'api[_-]?key\s*[=:]\s*["\'][a-zA-Z0-9]{16,}["\']',
+            r'apikey\s*[=:]\s*["\'][a-zA-Z0-9]{16,}["\']',
+            r'auth[_-]?token\s*[=:]\s*["\'][a-zA-Z0-9]{16,}["\']',
+            r'access[_-]?token\s*[=:]\s*["\'][a-zA-Z0-9]{16,}["\']',
+            r'private[_-]?key\s*[=:]\s*["\']',
+            r'connectionString\s*[=:]\s*["\'].*Password',
+            r'ConnectionString\s*=\s*["\'].*Password',
+
+            # 1. AWS Keys
+            r'AKIA[0-9A-Z]{16}',  # AWS Access Key ID
+            r'aws[_-]?secret[_-]?access[_-]?key\s*[=:]\s*["\'][A-Za-z0-9/+=]{40}["\']',
+            r'AWS_SECRET_ACCESS_KEY\s*[=:]\s*["\'][A-Za-z0-9/+=]{40}["\']',
+
+            # 2. Database Connection Strings
+            r'mongodb(\+srv)?://[^\s"\']+:[^\s"\']+@[^\s"\']+',  # MongoDB URI with creds
+            r'postgres(ql)?://[^\s"\']+:[^\s"\']+@[^\s"\']+',    # PostgreSQL URI with creds
+            r'mysql://[^\s"\']+:[^\s"\']+@[^\s"\']+',            # MySQL URI with creds
+            r'redis://[^\s"\']+:[^\s"\']+@[^\s"\']+',            # Redis URI with creds
+
+            # 3. Payment & SaaS API Keys
+            r'sk_live_[a-zA-Z0-9]{24,}',           # Stripe live secret key
+            r'sk_test_[a-zA-Z0-9]{24,}',           # Stripe test secret key
+            r'rk_live_[a-zA-Z0-9]{24,}',           # Stripe restricted key
+            r'https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[a-zA-Z0-9]+',  # Slack webhook
+            r'xox[baprs]-[0-9a-zA-Z-]+',           # Slack tokens
+
+            # 4. Session/App Secrets (generic high-entropy strings)
+            r'SESSION_SECRET\s*[=:]\s*["\'][^"\']{16,}["\']',
+            r'APP_SECRET\s*[=:]\s*["\'][^"\']{16,}["\']',
+            r'JWT_SECRET\s*[=:]\s*["\'][^"\']{16,}["\']',
+
+            # 5. Common variable names with values
+            r'admin[_-]?password\s*[=:]\s*["\'][^"\']{4,}["\']',
+            r'api[_-]?token\s*[=:]\s*["\'][^"\']{16,}["\']',
+            r'bearer[_-]?token\s*[=:]\s*["\'][^"\']{16,}["\']',
+
+            # 6. SSH/PGP Private Keys
+            r'-----BEGIN\s+(RSA|DSA|EC|OPENSSH|PGP)\s+PRIVATE\s+KEY-----',
+            r'-----BEGIN\s+PRIVATE\s+KEY-----',
+
+            # 7. Basic Auth Headers
+            r'Basic\s+[A-Za-z0-9+/=]{10,}',        # Base64 encoded Basic auth
+            r'Bearer\s+[A-Za-z0-9._-]{20,}',       # Bearer tokens
+
+            # 8. Additional cloud providers
+            r'AZURE[_-]?(?:CLIENT|TENANT|SUBSCRIPTION)[_-]?(?:ID|SECRET)\s*[=:]\s*["\'][^"\']+["\']',
+            r'GOOGLE[_-]?(?:API[_-]?KEY|CLIENT[_-]?SECRET)\s*[=:]\s*["\'][^"\']+["\']',
+            r'gh[pousr]_[A-Za-z0-9_]{36,}',        # GitHub tokens
+
+            # 9. JWT tokens (full format)
+            r'eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*',
+        ],
         severity=Severity.HIGH,
         languages=[".js", ".ts", ".py", ".php", ".java", ".cs", ".rb", ".go", ".kt", ".env", ".config", ".json", ".yaml", ".yml"],
-        false_positive_patterns=[r'process\.env', r'os\.environ', r'getenv', r'password\s*[=:]\s*["\']["\']', r'<PASSWORD>', r'\$\{', r'Environment\.GetEnvironmentVariable', r'Configuration\['],
+    false_positive_patterns=[r'process\.env', r'os\.environ', r'getenv', r'password\s*[=:]\s*["\']["\']', r'<PASSWORD>', r'\$\{', r'Environment\.GetEnvironmentVariable', r'Configuration\['],
     ),
-    VulnerabilityPattern(
-        name="Auth Bypass - JWT None Algorithm",
-        category=VulnCategory.AUTH_BYPASS,
-        patterns=[
+            VulnerabilityPattern(
+            name="Auth Bypass - JWT None Algorithm",
+            category=VulnCategory.AUTH_BYPASS,
+            patterns=[
             r'algorithms\s*[=:]\s*\[\s*["\']none["\']',
             r'algorithm\s*[=:]\s*["\']none["\']',
             r'jwt\.decode\s*\([^)]*verify\s*=\s*False',
@@ -1705,12 +1899,12 @@ VulnerabilityPattern(
         ],
         severity=Severity.CRITICAL,
         languages=[".js", ".ts", ".py", ".php", ".java", ".cs", ".rb", ".go"],
-        false_positive_patterns=[r'jwt\.verify', r'^#', r'^\s*#', r'//.*verify', r'FrappeClient.*verify=False'],
+    false_positive_patterns=[r'jwt\.verify', r'^#', r'^\s*#', r'//.*verify', r'FrappeClient.*verify=False'],
     ),
-    VulnerabilityPattern(
-        name="Auth Bypass - Weak Comparison",
-        category=VulnCategory.AUTH_BYPASS,
-        patterns=[
+            VulnerabilityPattern(
+            name="Auth Bypass - Weak Comparison",
+            category=VulnCategory.AUTH_BYPASS,
+            patterns=[
             r'password\s*==\s*',
             r'token\s*==\s*',
             r'secret\s*==\s*',
@@ -1719,90 +1913,90 @@ VulnerabilityPattern(
         ],
         severity=Severity.MEDIUM,
         languages=[".php", ".js"],
-        false_positive_patterns=[r'===', r'!=='],
+    false_positive_patterns=[r'===', r'!=='],
     ),
 
-    # =========================================================================
-    # SSTI (Server-Side Template Injection) PATTERNS
-    # =========================================================================
+            # =========================================================================
+            # SSTI (Server-Side Template Injection) PATTERNS
+            # =========================================================================
 
-    VulnerabilityPattern(
-    name="SSTI - Jinja2/Flask/Mako (Python)",
-    category=VulnCategory.SSTI,
-    patterns=[
-        # render_template_string with user input
-        r'render_template_string\s*\(\s*request\.(form|args|json|data|values|get_json)',
-        r'render_template_string\s*\(\s*f["\']',
-        r'render_template_string\s*\(\s*["\'].*%\s*\(',
-        r'render_template_string\s*\(\s*["\'].*\.format\s*\(',
-        r'render_template_string\s*\(\s*["\'].*\+',
-        r'render_template_string\s*\(\s*\w+\s*\)',  # Variable input
-        r'render_template_string\s*\(\s*str\s*\(',
-        
-        # Jinja2 Environment/Template direct
-        r'Template\s*\(\s*request\.(form|args|json|data)',
-        r'Template\s*\(\s*f["\']',
-        r'Template\s*\(\s*["\'].*%\s*\(',
-        r'Template\s*\(\s*["\'].*\.format\s*\(',
-        r'Template\s*\(\s*["\'].*\+',
-        r'jinja2\.Template\s*\(\s*request\.',
-        r'jinja2\.Template\s*\(\s*f["\']',
-        
-        # Environment.from_string
-        r'\.from_string\s*\(\s*request\.',
-        r'\.from_string\s*\(\s*f["\']',
-        r'\.from_string\s*\(\s*["\'].*%',
-        r'\.from_string\s*\(\s*["\'].*\+',
-        r'env\.from_string\s*\(\s*.*request\.',
-        r'Environment\s*\([^)]*\)\.from_string\s*\(',
-        r'get_template_attribute.*from_string',
-        
-        # Mako templates
-        r'mako\.template\.Template\s*\(\s*request\.',
-        r'mako\.template\.Template\s*\(\s*f["\']',
-        r'MakoTemplate\s*\(\s*request\.',
-        r'Template\s*\(\s*text\s*=\s*request\.',
-        r'Template\s*\(\s*text\s*=\s*f["\']',
-        r'mako\.lookup\.TemplateLookup.*get_template\s*\(\s*request\.',
-        
-        # Tornado templates
-        r'tornado\.template\.Template\s*\(\s*request\.',
-        r'tornado\.template\.Template\s*\(\s*self\.get_argument',
-        r'template\.Template\s*\(\s*self\.get_argument',
-        r'\.generate\s*\(\s*\*\*.*request\.',
-        
-        # Django (unsafe patterns)
-        r'django\.template\.Template\s*\(\s*request\.(GET|POST|body)',
-        r'Engine\s*\([^)]*\)\.from_string\s*\(\s*request\.',
-        r'engines\[["\']django["\']\]\.from_string\s*\(\s*request\.',
-        r'Template\s*\(\s*request\.(GET|POST|body)',
-        
-        # Chameleon
-        r'chameleon\.PageTemplate\s*\(\s*request\.',
-        r'PageTemplate\s*\(\s*request\.',
-        
-        # Genshi
-        r'genshi\.template\.MarkupTemplate\s*\(\s*request\.',
-        r'MarkupTemplate\s*\(\s*request\.',
-        r'TextTemplate\s*\(\s*request\.',
-        
-        # String formatting passed to render
-        r'\.render\s*\(\s*\{[^}]*:\s*request\.(form|args|json)',
-        r'\.render\s*\(\s*\*\*request\.(form|json)',
-        r'\.render_string\s*\(\s*request\.',
-    ],
-    severity=Severity.CRITICAL,
-    languages=[".py"],
+            VulnerabilityPattern(
+            name="SSTI - Jinja2/Flask/Mako (Python)",
+            category=VulnCategory.SSTI,
+            patterns=[
+            # render_template_string with user input
+            r'render_template_string\s*\(\s*request\.(form|args|json|data|values|get_json)',
+            r'render_template_string\s*\(\s*f["\']',
+            r'render_template_string\s*\(\s*["\'].*%\s*\(',
+            r'render_template_string\s*\(\s*["\'].*\.format\s*\(',
+            r'render_template_string\s*\(\s*["\'].*\+',
+            r'render_template_string\s*\(\s*\w+\s*\)',  # Variable input
+            r'render_template_string\s*\(\s*str\s*\(',
+
+            # Jinja2 Environment/Template direct
+            r'Template\s*\(\s*request\.(form|args|json|data)',
+            r'Template\s*\(\s*f["\']',
+            r'Template\s*\(\s*["\'].*%\s*\(',
+            r'Template\s*\(\s*["\'].*\.format\s*\(',
+            r'Template\s*\(\s*["\'].*\+',
+            r'jinja2\.Template\s*\(\s*request\.',
+            r'jinja2\.Template\s*\(\s*f["\']',
+
+            # Environment.from_string
+            r'\.from_string\s*\(\s*request\.',
+            r'\.from_string\s*\(\s*f["\']',
+            r'\.from_string\s*\(\s*["\'].*%',
+            r'\.from_string\s*\(\s*["\'].*\+',
+            r'env\.from_string\s*\(\s*.*request\.',
+            r'Environment\s*\([^)]*\)\.from_string\s*\(',
+            r'get_template_attribute.*from_string',
+
+            # Mako templates
+            r'mako\.template\.Template\s*\(\s*request\.',
+            r'mako\.template\.Template\s*\(\s*f["\']',
+            r'MakoTemplate\s*\(\s*request\.',
+            r'Template\s*\(\s*text\s*=\s*request\.',
+            r'Template\s*\(\s*text\s*=\s*f["\']',
+            r'mako\.lookup\.TemplateLookup.*get_template\s*\(\s*request\.',
+
+            # Tornado templates
+            r'tornado\.template\.Template\s*\(\s*request\.',
+            r'tornado\.template\.Template\s*\(\s*self\.get_argument',
+            r'template\.Template\s*\(\s*self\.get_argument',
+            r'\.generate\s*\(\s*\*\*.*request\.',
+
+            # Django (unsafe patterns)
+            r'django\.template\.Template\s*\(\s*request\.(GET|POST|body)',
+            r'Engine\s*\([^)]*\)\.from_string\s*\(\s*request\.',
+            r'engines\[["\']django["\']\]\.from_string\s*\(\s*request\.',
+            r'Template\s*\(\s*request\.(GET|POST|body)',
+
+            # Chameleon
+            r'chameleon\.PageTemplate\s*\(\s*request\.',
+            r'PageTemplate\s*\(\s*request\.',
+
+            # Genshi
+            r'genshi\.template\.MarkupTemplate\s*\(\s*request\.',
+            r'MarkupTemplate\s*\(\s*request\.',
+            r'TextTemplate\s*\(\s*request\.',
+
+            # String formatting passed to render
+            r'\.render\s*\(\s*\{[^}]*:\s*request\.(form|args|json)',
+            r'\.render\s*\(\s*\*\*request\.(form|json)',
+            r'\.render_string\s*\(\s*request\.',
+        ],
+        severity=Severity.CRITICAL,
+        languages=[".py"],
     false_positive_patterns=[
-        r'render_template\s*\(\s*["\'][^"\']+\.(html|jinja|j2)',
-        r'escape\s*\(',
-        r'Markup\s*\(',
-        r'markupsafe\.',
-        r'autoescape\s*=\s*True',
-        r'\.txt["\']',
-        r'select_autoescape',
-    ],
-),
+            r'render_template\s*\(\s*["\'][^"\']+\.(html|jinja|j2)',
+            r'escape\s*\(',
+            r'Markup\s*\(',
+            r'markupsafe\.',
+            r'autoescape\s*=\s*True',
+            r'\.txt["\']',
+            r'select_autoescape',
+        ],
+    ),
 
 VulnerabilityPattern(
     name="SSTI - EJS/Pug/Jade/Nunjucks/Handlebars (Node.js)",
@@ -1817,7 +2011,7 @@ VulnerabilityPattern(
         r'ejs\.compile\s*\(\s*`[^`]*\$\{',
         r'ejs\.renderFile\s*\(\s*req\.(body|query|params)',
         r'res\.render\s*\(\s*req\.(body|query|params)',  # Express with user-controlled view
-        
+
         # Pug/Jade
         r'pug\.compile\s*\(\s*req\.(body|query|params)',
         r'pug\.compile\s*\(\s*`[^`]*\$\{',
@@ -1828,7 +2022,7 @@ VulnerabilityPattern(
         r'jade\.compile\s*\(\s*req\.',
         r'jade\.render\s*\(\s*req\.',
         r'jade\.renderFile\s*\(\s*req\.',
-        
+
         # Nunjucks
         r'nunjucks\.renderString\s*\(\s*req\.',
         r'nunjucks\.renderString\s*\(\s*`[^`]*\$\{',
@@ -1837,7 +2031,7 @@ VulnerabilityPattern(
         r'env\.renderString\s*\(\s*req\.',
         r'nunjucks\.Environment.*renderString\s*\(\s*req\.',
         r'\.addGlobal\s*\([^)]*req\.(body|query|params)',
-        
+
         # Handlebars
         r'Handlebars\.compile\s*\(\s*req\.',
         r'Handlebars\.compile\s*\(\s*`[^`]*\$\{',
@@ -1847,48 +2041,48 @@ VulnerabilityPattern(
         r'Handlebars\.precompile\s*\(\s*req\.',
         r'Handlebars\.registerHelper.*req\.(body|query|params)',
         r'Handlebars\.SafeString\s*\(\s*req\.',  # Bypasses escaping
-        
+
         # Mustache
         r'Mustache\.render\s*\(\s*req\.',
         r'Mustache\.render\s*\(\s*`[^`]*\$\{',
         r'mustache\.render\s*\(\s*req\.',
         r'Mustache\.parse\s*\(\s*req\.',
-        
+
         # Lodash/Underscore template
         r'_\.template\s*\(\s*req\.',
         r'_\.template\s*\(\s*`[^`]*\$\{',
         r'_\.template\s*\(\s*["\'].*\+',
         r'lodash\.template\s*\(\s*req\.',
         r'underscore\.template\s*\(\s*req\.',
-        
+
         # doT.js
         r'doT\.template\s*\(\s*req\.',
         r'doT\.compile\s*\(\s*req\.',
         r'dot\.template\s*\(\s*req\.',
-        
+
         # Marko
         r'marko\.load\s*\(\s*req\.',
         r'\.renderToString\s*\(\s*\{[^}]*:\s*req\.',
-        
+
         # Swig (deprecated but still used)
         r'swig\.render\s*\(\s*req\.',
         r'swig\.compile\s*\(\s*req\.',
         r'swig\.renderFile\s*\(\s*req\.',
-        
+
         # Dust.js
         r'dust\.render\s*\(\s*req\.',
         r'dust\.compile\s*\(\s*req\.',
         r'dust\.renderSource\s*\(\s*req\.',
-        
+
         # Eta
         r'eta\.render\s*\(\s*req\.',
         r'eta\.renderString\s*\(\s*req\.',
         r'Eta\s*\(\s*\)\.renderString\s*\(\s*req\.',
-        
+
         # Squirrelly
         r'Sqrl\.render\s*\(\s*req\.',
         r'squirrelly\.render\s*\(\s*req\.',
-        
+
         # Generic patterns
         r'\.compile\s*\(\s*req\.(body|query|params)',
         r'\.render\s*\(\s*req\.(body|query|params)\s*[,\)]',
@@ -1897,7 +2091,7 @@ VulnerabilityPattern(
     ],
     severity=Severity.CRITICAL,
     languages=[".js", ".ts", ".jsx", ".tsx", ".mjs"],
-    false_positive_patterns=[
+        false_positive_patterns=[
         r'\.render\s*\(\s*["\'][^"\']+\.(html|ejs|pug|hbs|njk)',
         r'escape\s*\(',
         r'escapeHtml\s*\(',
@@ -1923,7 +2117,7 @@ VulnerabilityPattern(
         r'\.CompileRenderString\s*\(\s*.*Request\.',
         r'RazorTemplateEngine.*\.GenerateCode\s*\(',
         r'RazorLightEngine.*\.CompileRenderStringAsync\s*\(',
-        
+
         # Scriban
         r'Scriban\.Template\.Parse\s*\(\s*.*Request\.',
         r'Scriban\.Template\.Parse\s*\(\s*\$"',
@@ -1931,32 +2125,32 @@ VulnerabilityPattern(
         r'Template\.Parse\s*\(\s*\$"',
         r'Template\.ParseLiquid\s*\(\s*.*Request\.',
         r'\.Render\s*\(\s*.*Request\.(Query|Form)',
-        
+
         # Fluid (Liquid for .NET)
         r'FluidTemplate\.Parse\s*\(\s*.*Request\.',
         r'FluidParser\s*\(\s*\)\.Parse\s*\(\s*.*Request\.',
         r'_fluidParser\.Parse\s*\(\s*.*Request\.',
         r'IFluidTemplate.*Parse\s*\(\s*.*Request\.',
-        
+
         # DotLiquid
         r'DotLiquid\.Template\.Parse\s*\(\s*.*Request\.',
         r'DotLiquid\.Template\.Parse\s*\(\s*\$"',
         r'Template\.Parse\s*\(\s*.*Request\.(Query|Form|Body)',
         r'\.RegisterSafeType.*Request\.',  # Registering request as safe
-        
+
         # Handlebars.NET
         r'Handlebars\.Compile\s*\(\s*.*Request\.',
         r'Handlebars\.Compile\s*\(\s*\$"',
         r'handlebarsInstance\.Compile\s*\(\s*.*Request\.',
         r'HandlebarsTemplate.*Compile\s*\(\s*.*Request\.',
-        
+
         # Stubble (Mustache for .NET)
         r'StubbleBuilder.*Render\s*\(\s*.*Request\.',
         r'stubble\.Render\s*\(\s*.*Request\.',
-        
+
         # Nustache
         r'Nustache\.Core\.Render\.StringToString\s*\(\s*.*Request\.',
-        
+
         # ASPX (code expressions)
         r'<%=\s*Request\.',
         r'<%=\s*Request\[("|\')',
@@ -1965,7 +2159,7 @@ VulnerabilityPattern(
     ],
     severity=Severity.CRITICAL,
     languages=[".cs", ".cshtml", ".vb", ".aspx", ".ascx"],
-    false_positive_patterns=[
+        false_positive_patterns=[
         r'\.Parse\s*\(\s*["\'][^"\']*["\']',  # Static template string
         r'HtmlEncode',
         r'AntiXss',
@@ -1989,7 +2183,7 @@ VulnerabilityPattern(
         r'Environment\s*\([^)]*\)->render\s*\(\s*\$',
         r'->loadTemplate\s*\(\s*\$_(GET|POST|REQUEST)',
         r'Twig\\Loader\\ArrayLoader\s*\(\s*\[.*\$_(GET|POST)',
-        
+
         # Blade (Laravel)
         r'Blade::compileString\s*\(\s*\$',
         r'Blade::render\s*\(\s*\$',
@@ -1998,7 +2192,7 @@ VulnerabilityPattern(
         r'View::make\s*\(\s*\$_(GET|POST|REQUEST)',
         r'@php.*\$_(GET|POST|REQUEST)',
         r'\{!!\s*\$_(GET|POST|REQUEST)',  # Unescaped Blade output
-        
+
         # Smarty
         r'\{php\}',  # Dangerous Smarty tag
         r'\{/php\}',
@@ -2011,28 +2205,28 @@ VulnerabilityPattern(
         r'\{include\s+file=.*\$',
         r'->registerPlugin.*eval',
         r'->setTemplateDir\s*\(\s*\$_(GET|POST)',
-        
+
         # Latte
         r'Latte\\Engine.*render\s*\(\s*\$',
         r'Latte\\Engine.*renderToString\s*\(\s*\$',
         r'->renderToString\s*\(\s*\$_(GET|POST)',
         r'\$latte->render\s*\(\s*\$_(GET|POST)',
         r'createTemplate\s*\(\s*\$_(GET|POST)',
-        
+
         # Plates
         r'->render\s*\(\s*\$_(GET|POST|REQUEST)',
         r'League\\Plates.*render\s*\(\s*\$',
         r'\$plates->render\s*\(\s*\$',
-        
+
         # Mustache.php
         r'Mustache_Engine.*render\s*\(\s*\$',
         r'\$mustache->render\s*\(\s*\$_(GET|POST)',
         r'->loadTemplate\s*\(\s*\$_(GET|POST)',
-        
+
         # Volt (Phalcon)
         r'Volt.*compile\s*\(\s*\$',
         r'->render\s*\(\s*\$_(GET|POST)',
-        
+
         # Generic PHP patterns
         r'eval\s*\(\s*.*\$_(GET|POST|REQUEST|COOKIE)',
         r'create_function\s*\(\s*.*\$_(GET|POST|REQUEST)',
@@ -2041,7 +2235,7 @@ VulnerabilityPattern(
     ],
     severity=Severity.CRITICAL,
     languages=[".php", ".tpl", ".blade.php", ".twig", ".latte", ".phtml"],
-    false_positive_patterns=[
+        false_positive_patterns=[
         r'->render\s*\(\s*["\'][^"\']+\.twig',
         r'->render\s*\(\s*["\'][^"\']+\.blade\.php',
         r'escape\s*\(',
@@ -2069,7 +2263,7 @@ VulnerabilityPattern(
         r'\[\(.*\$\{.*getParameter',  # Unescaped inline
         r'data-th-utext',
         r'StandardExpressionParser.*parseExpression\s*\(\s*.*getParameter',
-        
+
         # Freemarker
         r'Template.*process\s*\(\s*.*getParameter',
         r'Configuration.*getTemplate\s*\(\s*.*getParameter',
@@ -2080,7 +2274,7 @@ VulnerabilityPattern(
         r'\$\{.*request\.getParameter',
         r'cfg\.setSharedVariable.*getParameter',
         r'Environment.*setVariable.*getParameter',
-        
+
         # Velocity
         r'Velocity\.evaluate\s*\(\s*.*getParameter',
         r'Velocity\.evaluate\s*\(\s*.*request\.get',
@@ -2093,19 +2287,19 @@ VulnerabilityPattern(
         r'#set\s*\(\s*\$.*=.*getParameter',
         r'#evaluate\s*\(',
         r'#parse\s*\(\s*.*getParameter',
-        
+
         # Pebble
         r'PebbleEngine.*getTemplate\s*\(\s*.*getParameter',
         r'PebbleEngine.*getLiteralTemplate\s*\(\s*.*getParameter',
         r'pebbleEngine\.getLiteralTemplate\s*\(\s*.*request\.get',
         r'\.evaluate\s*\(\s*.*getParameter',
-        
+
         # Groovy Templates (GSP)
         r'GroovyPagesTemplateEngine.*createTemplate\s*\(\s*.*getParameter',
         r'SimpleTemplateEngine.*createTemplate\s*\(\s*.*getParameter',
         r'GStringTemplateEngine.*createTemplate\s*\(\s*.*getParameter',
         r'MarkupTemplateEngine.*createTemplate\s*\(\s*.*getParameter',
-        
+
         # OGNL (Struts2) - very dangerous
         r'%\{.*#.*\}',  # OGNL expression
         r'OgnlUtil\.getValue\s*\(\s*.*getParameter',
@@ -2113,7 +2307,7 @@ VulnerabilityPattern(
         r'Ognl\.getValue\s*\(\s*.*request\.get',
         r'OgnlValueStack.*findValue\s*\(\s*.*getParameter',
         r'ActionContext.*get\s*\(\s*.*getParameter',
-        
+
         # SpEL (Spring Expression Language)
         r'SpelExpressionParser.*parseExpression\s*\(\s*.*getParameter',
         r'ExpressionParser.*parseExpression\s*\(\s*.*request\.get',
@@ -2121,12 +2315,12 @@ VulnerabilityPattern(
         r'SpelExpression.*getValue\s*\(\s*.*getParameter',
         r'new\s+SpelExpressionParser\s*\(\s*\)\.parseExpression\s*\(\s*.*getParameter',
         r'@Value\s*\(\s*["\']#\{.*getParameter',
-        
+
         # MVEL
         r'MVEL\.eval\s*\(\s*.*getParameter',
         r'MVEL\.compileExpression\s*\(\s*.*getParameter',
         r'MVELRuntime.*eval\s*\(\s*.*getParameter',
-        
+
         # JEXL
         r'JexlEngine.*createExpression\s*\(\s*.*getParameter',
         r'JexlExpression.*evaluate\s*\(\s*.*getParameter',
@@ -2134,7 +2328,7 @@ VulnerabilityPattern(
     ],
     severity=Severity.CRITICAL,
     languages=[".java", ".kt", ".groovy", ".gsp", ".ftl", ".vm"],
-    false_positive_patterns=[
+        false_positive_patterns=[
         r'\.process\s*\(\s*["\'][^"\']+\.html',
         r'\.getTemplate\s*\(\s*["\'][^"\']+\.(ftl|vm|html)',
         r'HtmlUtils\.htmlEscape',
@@ -2156,39 +2350,39 @@ VulnerabilityPattern(
         r'Erubis::Eruby\.new\s*\(\s*params\[',
         r'Erubis::Eruby\.new\s*\(\s*request\.',
         r'\.result\s*\(\s*binding\s*\).*params',  # ERB result with binding
-        
+
         # Slim
         r'Slim::Template\.new\s*\(\s*params\[',
         r'Slim::Template\.new\s*\(\s*request\.',
         r'slim\s*\(\s*params\[',
         r'Slim::Engine\.new\.render\s*\(\s*params\[',
-        
+
         # Haml
         r'Haml::Engine\.new\s*\(\s*params\[',
         r'Haml::Engine\.new\s*\(\s*request\.',
         r'haml\s*\(\s*params\[',
         r'Haml::Template\.new\s*\(\s*params\[',
-        
+
         # Liquid
         r'Liquid::Template\.parse\s*\(\s*params\[',
         r'Liquid::Template\.parse\s*\(\s*request\.',
         r'\.parse\s*\(\s*params\[',
         r'\.render\s*\(\s*.*params\[',
         r'Liquid::Environment.*parse\s*\(\s*params\[',
-        
+
         # Tilt (generic template interface)
         r'Tilt\.new\s*\(\s*params\[',
         r'Tilt\[["\'].*["\']\]\.new\s*\(\s*params\[',
-        
+
         # ActionView render inline
         r'render\s+inline:\s*params\[',
         r'render\s+inline:\s*.*#\{.*params',
         r'render\s+inline:\s*request\.',
         r'render\s*\(\s*inline:\s*params\[',
-        
+
         # Mustache
         r'Mustache\.render\s*\(\s*params\[',
-        
+
         # Generic Ruby interpolation in templates
         r'eval\s*\(\s*params\[',
         r'instance_eval\s*\(\s*params\[',
@@ -2197,7 +2391,7 @@ VulnerabilityPattern(
     ],
     severity=Severity.CRITICAL,
     languages=[".rb", ".erb", ".haml", ".slim", ".rhtml"],
-    false_positive_patterns=[
+        false_positive_patterns=[
         r'ERB\.new\s*\(\s*File\.read',
         r'render\s+template:',
         r'render\s+partial:',
@@ -2224,32 +2418,32 @@ VulnerabilityPattern(
         r'\.Parse\s*\(\s*fmt\.Sprintf',
         r'\.Parse\s*\(\s*.*\+.*r\.',
         r'template\.ParseGlob\s*\(\s*r\.',
-        
+
         # Pongo2
         r'pongo2\.FromString\s*\(\s*r\.',
         r'pongo2\.FromString\s*\(\s*.*r\.Form',
         r'pongo2\.Must\s*\(\s*.*FromString\s*\(\s*r\.',
         r'pongo2\.FromBytes\s*\(\s*.*r\.',
-        
+
         # Jet
         r'jet\.NewSet\s*\([^)]*\)\.Parse\s*\(\s*r\.',
         r'views\.GetTemplate\s*\(\s*r\.',
-        
+
         # Ace
         r'ace\.Load\s*\(\s*r\.',
-        
+
         # Amber
         r'amber\.CompileString\s*\(\s*r\.',
-        
+
         # Quicktemplate
         r'Write.*\(\s*r\.Form',
-        
+
         # Hero
         r'hero\.Render\s*\(\s*r\.',
     ],
     severity=Severity.CRITICAL,
     languages=[".go"],
-    false_positive_patterns=[
+        false_positive_patterns=[
         r'\.ParseFiles\s*\(',
         r'\.ParseGlob\s*\(\s*["\']',
         r'template\.HTMLEscapeString',
@@ -2281,7 +2475,7 @@ VulnerabilityPattern(
         r'\{\{.*\|attr\s*\(',
         r'\{\%.*import\s+os',
         r'\{\%.*from\s+os\s+import',
-        
+
         # Freemarker exploitation
         r'<#assign\s+.*=.*ObjectConstructor',
         r'<#assign\s+.*=.*\.class\.forName',
@@ -2291,7 +2485,7 @@ VulnerabilityPattern(
         r'\?new\s*\(\s*\)',
         r'\.getClassLoader',
         r'\.newInstance\s*\(',
-        
+
         # Velocity exploitation
         r'#set\s*\(\s*\$.*=.*getClass\s*\(',
         r'#set\s*\(\s*\$.*=.*\.class\.forName',
@@ -2301,7 +2495,7 @@ VulnerabilityPattern(
         r'#evaluate\s*\(\s*\$',
         r'#include\s*\(\s*\$',
         r'#parse\s*\(\s*\$',
-        
+
         # OGNL exploitation (Struts2)
         r'%\{\s*#.*=.*@',
         r'%\{.*getRuntime',
@@ -2312,7 +2506,7 @@ VulnerabilityPattern(
         r'#application',
         r'#session',
         r'OgnlContext',
-        
+
         # SpEL exploitation
         r'\$\{T\s*\(\s*java\.lang',
         r'\$\{.*Runtime.*exec',
@@ -2321,26 +2515,26 @@ VulnerabilityPattern(
         r'#\{T\s*\(\s*java\.lang',
         r'new\s+java\.lang\.ProcessBuilder',
         r'T\s*\(\s*java\.lang\.Runtime\s*\)',
-        
+
         # Pebble exploitation
         r'\{\{.*\.getClass\(\)',
         r'\{\{.*beans\.get',
         r'\{\{.*getRuntime',
-        
+
         # Smarty exploitation
         r'\{php\}.*exec',
         r'\{php\}.*system',
         r'\{php\}.*passthru',
         r'\{php\}.*shell_exec',
         r'\{Smarty_Internal_Write_File',
-        
+
         # ERB exploitation
         r'<%=.*`.*%>',  # Command substitution
         r'<%=.*system\s*\(',
         r'<%=.*exec\s*\(',
         r'<%=.*IO\.popen',
         r'<%=.*Open3',
-        
+
         # Generic exploitation patterns
         r'__proto__',
         r'constructor\s*\[',
@@ -2350,30 +2544,53 @@ VulnerabilityPattern(
     ],
     severity=Severity.CRITICAL,
     languages=[".py", ".php", ".java", ".js", ".ts", ".rb", ".go", ".tpl", ".html", ".htm", ".ftl", ".vm", ".erb", ".kt", ".groovy"],
-),
+        ),
 
-    # =========================================================================
-# SSRF (Server-Side Request Forgery) PATTERNS
-# =========================================================================
+        # =========================================================================
+        # SSRF (Server-Side Request Forgery) PATTERNS
+        # =========================================================================
+        # =========================================================================
+        # SSRF PATTERNS - IMPROVED
+        # =========================================================================
 
-VulnerabilityPattern(
-    name="SSRF - Dynamic URL Fetch (Node.js)",
-    category=VulnCategory.SSRF,
-    patterns=[
-        # Fetch API
-        r'fetch\s*\(\s*req\.(body|query|params)',
+        VulnerabilityPattern(
+        name="SSRF - Dynamic URL Fetch (Node.js)",
+        category=VulnCategory.SSRF,
+        patterns=[
+        # =====================================================================
+        # FETCH API
+        # =====================================================================
+        # Direct request object usage
+        r'fetch\s*\(\s*req\.(body|query|params|cookies|headers)',
         r'fetch\s*\(\s*`[^`]*\$\{[^}]*req\.',
         r'fetch\s*\(\s*["\'].*\+.*req\.',
-        r'fetch\s*\(\s*\w+\s*\)',  # fetch(userVar) - variable from user input
-        
-        # Axios
+
+        # Variable-based (common taint variable names)
+        r'fetch\s*\(\s*(url|uri|target|endpoint|href|link|dest|destination|path|host|'
+        r'userUrl|targetUrl|redirectUrl|callbackUrl|imageUrl|fetchUrl|apiUrl|'
+        r'externalUrl|remoteUrl|resourceUrl|fileUrl|downloadUrl)\s*[,\)]',
+
+        # Template literal with any variable interpolation
+        r'fetch\s*\(\s*`[^`]*\$\{(?!process\.env)[^}]+\}',
+
+        # =====================================================================
+        # AXIOS
+        # =====================================================================
         r'axios\.(get|post|put|delete|patch|head|options|request)\s*\(\s*req\.',
-        r'axios\.(get|post|put|delete|patch|head|options|request)\s*\(\s*`[^`]*\$\{',
+        r'axios\.(get|post|put|delete|patch|head|options|request)\s*\(\s*`[^`]*\$\{(?!process\.env)',
         r'axios\.(get|post|put|delete|patch|head|options|request)\s*\(\s*["\'].*\+',
         r'axios\s*\(\s*\{[^}]*url\s*:\s*req\.',
         r'axios\s*\(\s*\{[^}]*url\s*:\s*`[^`]*\$\{',
-        
-        # Native http/https modules
+
+        # Axios with variable URL
+        r'axios\.(get|post|put|delete|patch|head|options|request)\s*\(\s*'
+        r'(url|uri|target|endpoint|href|link|dest|userUrl|targetUrl|apiUrl|'
+        r'externalUrl|remoteUrl|fetchUrl)\s*[,\)]',
+        r'axios\s*\(\s*\{[^}]*url\s*:\s*(?![\'"`))[a-zA-Z_]\w*\s*[,\}]',
+
+        # =====================================================================
+        # NATIVE HTTP/HTTPS MODULES
+        # =====================================================================
         r'https?\.get\s*\(\s*req\.(body|query|params)',
         r'https?\.get\s*\(\s*`[^`]*\$\{',
         r'https?\.get\s*\(\s*["\'].*\+',
@@ -2381,36 +2598,73 @@ VulnerabilityPattern(
         r'https?\.request\s*\(\s*\{[^}]*hostname?\s*:\s*req\.',
         r'https?\.request\s*\(\s*\{[^}]*host\s*:\s*req\.',
         r'https?\.request\s*\(\s*\{[^}]*path\s*:\s*req\.',
-        
-        # Got, node-fetch, superagent, needle
+
+        # Variable-based
+        r'https?\.get\s*\(\s*(url|uri|target|endpoint|userUrl|targetUrl)\s*[,\)]',
+        r'https?\.request\s*\(\s*\{[^}]*hostname?\s*:\s*(?![\'"localhost])[a-zA-Z_]\w*\s*[,\}]',
+
+        # =====================================================================
+        # GOT, NODE-FETCH, SUPERAGENT, NEEDLE, REQUEST
+        # =====================================================================
         r'got\s*\(\s*req\.(body|query|params)',
         r'got\s*\(\s*`[^`]*\$\{',
         r'got\.(get|post|put|delete|patch)\s*\(\s*req\.',
+        r'got\s*\(\s*(url|uri|target|endpoint|userUrl|targetUrl|fetchUrl)\s*[,\)]',
+
         r'needle\s*\(\s*["\']get["\'],\s*req\.',
         r'needle\.(get|post|put|delete|patch)\s*\(\s*req\.',
+        r'needle\s*\(\s*["\'](?:get|post)["\'],\s*(url|target|endpoint)\s*[,\)]',
+
         r'superagent\.(get|post|put|delete|patch)\s*\(\s*req\.',
+        r'superagent\.(get|post|put|delete|patch)\s*\(\s*(url|target|endpoint)\s*\)',
+
         r'request\s*\(\s*req\.(body|query|params)',
         r'request\s*\(\s*\{[^}]*url\s*:\s*req\.',
-        
-        # URL constructor with user input
+        r'request\s*\(\s*(url|uri|target|endpoint|userUrl)\s*[,\)]',
+        r'request\s*\(\s*\{[^}]*url\s*:\s*(?![\'"https?://])[a-zA-Z_]\w*\s*[,\}]',
+
+        # =====================================================================
+        # URL CONSTRUCTOR WITH USER INPUT
+        # =====================================================================
         r'new\s+URL\s*\(\s*req\.(body|query|params)',
         r'new\s+URL\s*\(\s*`[^`]*\$\{[^}]*req\.',
-        
-        # Puppeteer/Playwright (headless browser SSRF)
+        r'new\s+URL\s*\(\s*(userUrl|targetUrl|inputUrl|urlParam|urlInput)\s*[,\)]',
+
+        # =====================================================================
+        # PUPPETEER/PLAYWRIGHT (HEADLESS BROWSER SSRF)
+        # =====================================================================
         r'page\.goto\s*\(\s*req\.',
         r'page\.goto\s*\(\s*`[^`]*\$\{',
+        r'page\.goto\s*\(\s*(url|uri|target|userUrl|targetUrl)\s*[,\)]',
         r'page\.navigate\s*\(\s*req\.',
         r'browser\.newPage.*goto\s*\(\s*req\.',
+
+        # =====================================================================
+        # GENERIC VARIABLE PATTERNS (catches function params likely from user)
+        # =====================================================================
+        # Function receiving URL parameter and using it
+        r'(?:async\s+)?function\s+\w+\s*\(\s*(?:[^)]*,\s*)?(url|uri|target|endpoint)\s*[,\)]'
+        r'[^}]*(?:fetch|axios|got|request|https?\.get)\s*\(\s*\1',
     ],
     severity=Severity.HIGH,
-    languages=[".js", ".ts", ".jsx", ".tsx"],
-    false_positive_patterns=[
+    languages=[".js", ".ts", ".jsx", ".tsx", ".mjs"],
+        false_positive_patterns=[
         r'https?://localhost',
         r'https?://127\.0\.0\.1',
+        r'https?://0\.0\.0\.0',
+        r'https?://\[::1\]',
         r'isValidUrl\s*\(',
         r'validateUrl\s*\(',
+        r'isSafeUrl\s*\(',
         r'allowedHosts',
+        r'allowedDomains',
         r'whitelist',
+        r'allowlist',
+        r'ALLOWED_HOSTS',
+        r'process\.env\.',                    # Environment variables are typically safe
+        r'config\.\w+[Uu]rl',                 # Config URLs are typically safe
+        r'URL\.canParse\s*\(',                # URL validation
+        r'new\s+URL\s*\([^)]+\)\.hostname',   # Extracting hostname for validation
     ],
 ),
 
@@ -2418,48 +2672,113 @@ VulnerabilityPattern(
     name="SSRF - Dynamic URL Fetch (Python)",
     category=VulnCategory.SSRF,
     patterns=[
-        # requests library
-        r'requests\.(get|post|put|delete|patch|head|options)\s*\(\s*request\.(form|args|json|data|values)',
+        # =====================================================================
+        # REQUESTS LIBRARY (THIS IS WHAT YOU WERE MISSING!)
+        # =====================================================================
+        # Direct request object usage (Flask/Django)
+        r'requests\.(get|post|put|delete|patch|head|options)\s*\(\s*request\.(form|args|json|data|values|GET|POST)',
         r'requests\.(get|post|put|delete|patch|head|options)\s*\(\s*f["\']',
         r'requests\.(get|post|put|delete|patch|head|options)\s*\(\s*["\'].*\+',
         r'requests\.(get|post|put|delete|patch|head|options)\s*\(\s*["\'].*\.format\s*\(',
-        r'requests\.(get|post|put|delete|patch|head|options)\s*\(\s*url\s*\)',  # variable
-        
-        # urllib
+        r'requests\.(get|post|put|delete|patch|head|options)\s*\(\s*["\'].*%\s*',
+
+        # CRITICAL: Variable-based patterns (catches `requests.get(target)`)
+        r'requests\.(get|post|put|delete|patch|head|options|request)\s*\(\s*'
+        r'(url|uri|target|endpoint|href|link|dest|destination|'
+        r'user_url|target_url|redirect_url|callback_url|image_url|fetch_url|api_url|'
+        r'external_url|remote_url|resource_url|file_url|download_url|'
+        r'url_param|url_input|input_url|param_url)\s*[,\)]',
+
+        # Generic variable (non-string literal) - higher FP rate but catches more
+        r'requests\.(get|post|put|delete|patch|head|options)\s*\(\s*(?!["\'\(f])([a-z_][a-z0-9_]*)\s*[,\)]',
+
+        # =====================================================================
+        # URLLIB
+        # =====================================================================
         r'urllib\.request\.urlopen\s*\(\s*request\.',
         r'urllib\.request\.urlopen\s*\(\s*f["\']',
         r'urllib\.request\.urlopen\s*\(\s*["\'].*\+',
         r'urllib\.request\.urlopen\s*\(\s*["\'].*\.format\s*\(',
         r'urlopen\s*\(\s*request\.',
         r'urllib\.request\.Request\s*\(\s*request\.',
-        
-        # httpx (async)
+
+        # Variable-based
+        r'urllib\.request\.urlopen\s*\(\s*(url|uri|target|endpoint|user_url|target_url)\s*[,\)]',
+        r'urlopen\s*\(\s*(url|uri|target|endpoint|user_url|target_url)\s*[,\)]',
+        r'urllib\.request\.Request\s*\(\s*(url|uri|target|endpoint)\s*[,\)]',
+
+        # =====================================================================
+        # HTTPX (ASYNC)
+        # =====================================================================
         r'httpx\.(get|post|put|delete|patch|head|options)\s*\(\s*request\.',
         r'httpx\.AsyncClient\s*\(\s*\)\.get\s*\(\s*request\.',
         r'await\s+httpx\.(get|post|put|delete|patch)\s*\(\s*f["\']',
         r'client\.(get|post|put|delete)\s*\(\s*request\.(form|args|json)',
-        
-        # aiohttp (async)
+
+        # Variable-based
+        r'httpx\.(get|post|put|delete|patch|head|options)\s*\(\s*(url|uri|target|endpoint|user_url)\s*[,\)]',
+        r'await\s+(?:client|httpx)\.(get|post|put|delete)\s*\(\s*(url|target|endpoint)\s*[,\)]',
+
+        # =====================================================================
+        # AIOHTTP (ASYNC)
+        # =====================================================================
         r'session\.(get|post|put|delete|patch)\s*\(\s*request\.',
         r'aiohttp\.ClientSession\s*\(\s*\)\.get\s*\(\s*request\.',
         r'await\s+session\.(get|post)\s*\(\s*f["\']',
-        
-        # http.client
+
+        # Variable-based
+        r'session\.(get|post|put|delete|patch)\s*\(\s*(url|uri|target|endpoint|user_url)\s*[,\)]',
+        r'await\s+session\.(get|post|put|delete)\s*\(\s*(url|target|endpoint)\s*[,\)]',
+
+        # =====================================================================
+        # HTTP.CLIENT
+        # =====================================================================
         r'http\.client\.HTTPConnection\s*\(\s*request\.',
         r'HTTPConnection\s*\(\s*request\.',
         r'HTTPSConnection\s*\(\s*request\.',
-        
-        # pycurl
+        r'HTTPConnection\s*\(\s*(host|target|endpoint|user_host)\s*[,\)]',
+        r'HTTPSConnection\s*\(\s*(host|target|endpoint|user_host)\s*[,\)]',
+
+        # =====================================================================
+        # PYCURL
+        # =====================================================================
         r'pycurl.*CURLOPT_URL.*request\.',
         r'curl\.setopt\s*\(.*URL.*request\.',
+        r'curl\.setopt\s*\([^,]+,\s*pycurl\.URL\s*,\s*(url|target|endpoint)\s*\)',
+
+        # =====================================================================
+        # SOCKET-LEVEL (low-level SSRF)
+        # =====================================================================
+        r'socket\.create_connection\s*\(\s*\(\s*(host|target|endpoint|user_host)',
+        r'socket\.connect\s*\(\s*\(\s*request\.',
+
+        # =====================================================================
+        # GENERIC VARIABLE ASSIGNMENT PATTERNS
+        # =====================================================================
+        # Catches: url = request.args.get('url'); ... requests.get(url)
+        # This is a simplified pattern - full taint tracking needs dataflow analysis
+        r'(?:url|target|endpoint)\s*=\s*request\.(args|form|json|data|GET|POST)',
     ],
     severity=Severity.HIGH,
     languages=[".py"],
-    false_positive_patterns=[
-        r'validate_url',
-        r'is_safe_url',
+        false_positive_patterns=[
+        r'validate_url\s*\(',
+        r'is_safe_url\s*\(',
+        r'is_valid_url\s*\(',
+        r'check_url\s*\(',
+        r'sanitize_url\s*\(',
         r'ALLOWED_HOSTS',
-        r'urlparse.*netloc.*in\s+',
+        r'ALLOWED_DOMAINS',
+        r'urlparse\s*\([^)]+\)\.netloc\s+in\s+',
+        r'urlparse\s*\([^)]+\)\.scheme\s+in\s+\[',
+        r'\.netloc\s*==',
+        r'\.hostname\s*in\s+',
+        r'settings\.\w+URL',                    # Django settings
+        r'os\.environ\.get\s*\(["\'].*URL',     # Environment variables
+        r'config\.\w+[Uu]rl',                   # Config URLs
+        r'localhost',
+        r'127\.0\.0\.1',
+        r'0\.0\.0\.0',
     ],
 ),
 
@@ -2467,39 +2786,75 @@ VulnerabilityPattern(
     name="SSRF - Dynamic URL Fetch (PHP)",
     category=VulnCategory.SSRF,
     patterns=[
-        # file_get_contents
+        # =====================================================================
+        # FILE_GET_CONTENTS
+        # =====================================================================
         r'file_get_contents\s*\(\s*\$_(GET|POST|REQUEST|COOKIE)',
         r'file_get_contents\s*\(\s*\$[a-zA-Z_]\w*\s*\)',
         r'file_get_contents\s*\(\s*["\'].*\.\s*\$',
-        
-        # cURL
+        r'file_get_contents\s*\(\s*".*\$\{',
+
+        # Variable-based
+        r'file_get_contents\s*\(\s*\$(url|uri|target|endpoint|href|link|'
+        r'userUrl|targetUrl|fetchUrl|remoteUrl|fileUrl)\s*\)',
+
+        # =====================================================================
+        # CURL
+        # =====================================================================
         r'curl_setopt\s*\([^,]+,\s*CURLOPT_URL\s*,\s*\$_(GET|POST|REQUEST)',
         r'curl_setopt\s*\([^,]+,\s*CURLOPT_URL\s*,\s*\$',
         r'curl_init\s*\(\s*\$_(GET|POST|REQUEST)',
         r'curl_init\s*\(\s*\$[a-zA-Z_]\w*\s*\)',
         r'curl_setopt_array\s*\([^,]+,\s*\[[^\]]*CURLOPT_URL\s*=>\s*\$',
-        
-        # fopen with URL wrappers
+
+        # Variable-based
+        r'curl_init\s*\(\s*\$(url|uri|target|endpoint|href|userUrl|targetUrl)\s*\)',
+        r'curl_setopt\s*\([^,]+,\s*CURLOPT_URL\s*,\s*\$(url|target|endpoint)\s*\)',
+
+        # =====================================================================
+        # FOPEN WITH URL WRAPPERS
+        # =====================================================================
         r'fopen\s*\(\s*\$_(GET|POST|REQUEST)',
         r'fopen\s*\(\s*["\']https?://.*\.\s*\$',
-        
-        # Guzzle
+        r'fopen\s*\(\s*\$(url|uri|target|endpoint|href)\s*,',
+
+        # =====================================================================
+        # GUZZLE
+        # =====================================================================
         r'->request\s*\(\s*["\']GET["\'],\s*\$',
         r'->get\s*\(\s*\$_(GET|POST|REQUEST)',
         r'new\s+Client.*->get\s*\(\s*\$',
-        
-        # copy() with URL
+        r'->get\s*\(\s*\$(url|uri|target|endpoint|userUrl)\s*[,\)]',
+        r'->post\s*\(\s*\$(url|uri|target|endpoint)\s*[,\)]',
+        r'->request\s*\(\s*["\'](?:GET|POST)["\'],\s*\$(url|target|endpoint)\s*[,\)]',
+
+        # =====================================================================
+        # COPY/READFILE WITH URL
+        # =====================================================================
         r'copy\s*\(\s*\$_(GET|POST|REQUEST)',
         r'copy\s*\(\s*["\']https?://.*\.\s*\$',
-        
-        # readfile with URL
+        r'copy\s*\(\s*\$(url|uri|target|source|remoteUrl)\s*,',
+
         r'readfile\s*\(\s*\$_(GET|POST|REQUEST)',
+        r'readfile\s*\(\s*\$(url|uri|target|fileUrl|remoteUrl)\s*\)',
+
+        # =====================================================================
+        # SIMPLEXML / DOM
+        # =====================================================================
+        r'simplexml_load_file\s*\(\s*\$_(GET|POST|REQUEST)',
+        r'simplexml_load_file\s*\(\s*\$(url|uri|target|xmlUrl)\s*\)',
+        r'DOMDocument.*->load\s*\(\s*\$',
     ],
     severity=Severity.HIGH,
     languages=[".php"],
-    false_positive_patterns=[
-        r'filter_var.*FILTER_VALIDATE_URL',
-        r'parse_url.*\[.host.\].*===',
+        false_positive_patterns=[
+        r'filter_var\s*\([^,]+,\s*FILTER_VALIDATE_URL',
+        r'parse_url\s*\([^)]+\)\s*\[["\']host["\']\]\s*===',
+        r'in_array\s*\(\s*parse_url',
+        r'preg_match\s*\([^,]+allowed',
+        r'ALLOWED_HOSTS',
+        r'whitelist',
+        r'allowlist',
     ],
 ),
 
@@ -2507,38 +2862,77 @@ VulnerabilityPattern(
     name="SSRF - Dynamic URL Fetch (Java)",
     category=VulnCategory.SSRF,
     patterns=[
-        # URL/HttpURLConnection
+        # =====================================================================
+        # URL/HTTPURLCONNECTION
+        # =====================================================================
         r'new\s+URL\s*\(\s*request\.getParameter',
         r'new\s+URL\s*\(\s*.*\+.*request\.get',
         r'URL\s*\(\s*.*\+.*getParameter',
         r'openConnection\s*\(\s*\).*getParameter',
-        
-        # HttpClient (Java 11+)
+
+        # Variable-based
+        r'new\s+URL\s*\(\s*(url|uri|target|endpoint|userUrl|targetUrl|inputUrl)\s*\)',
+        r'new\s+URL\s*\(\s*[a-zA-Z_]\w*\s*\)\.openConnection',
+
+        # =====================================================================
+        # HTTPCLIENT (JAVA 11+)
+        # =====================================================================
         r'HttpClient.*send\s*\(.*request\.getParameter',
         r'HttpRequest\.newBuilder\s*\(\s*\)\.uri\s*\(.*request\.get',
-        
-        # Apache HttpClient
+        r'HttpRequest\.newBuilder\s*\(\s*\)\.uri\s*\(\s*URI\.create\s*\(\s*(url|target|endpoint)',
+
+        # =====================================================================
+        # APACHE HTTPCLIENT
+        # =====================================================================
         r'HttpGet\s*\(\s*request\.getParameter',
         r'HttpPost\s*\(\s*request\.getParameter',
         r'new\s+HttpGet\s*\(\s*.*\+',
         r'new\s+HttpPost\s*\(\s*.*\+',
-        
-        # OkHttp
+
+        # Variable-based
+        r'new\s+HttpGet\s*\(\s*(url|uri|target|endpoint|userUrl|targetUrl)\s*\)',
+        r'new\s+HttpPost\s*\(\s*(url|uri|target|endpoint|userUrl)\s*\)',
+        r'new\s+HttpPut\s*\(\s*(url|uri|target|endpoint)\s*\)',
+        r'new\s+HttpDelete\s*\(\s*(url|uri|target|endpoint)\s*\)',
+
+        # =====================================================================
+        # OKHTTP
+        # =====================================================================
         r'Request\.Builder\s*\(\s*\)\.url\s*\(.*request\.get',
         r'new\s+Request\.Builder\s*\(\s*\)\.url\s*\(\s*.*\+',
-        
-        # RestTemplate (Spring)
-        r'restTemplate\.(getForObject|getForEntity|postForObject|exchange)\s*\(\s*.*request\.get',
+        r'new\s+Request\.Builder\s*\(\s*\)\.url\s*\(\s*(url|target|endpoint|userUrl)\s*\)',
+
+        # =====================================================================
+        # RESTTEMPLATE (SPRING)
+        # =====================================================================
+        r'restTemplate\.(getForObject|getForEntity|postForObject|postForEntity|exchange)\s*\(\s*.*request\.get',
         r'RestTemplate.*\.(get|post).*\(\s*.*\+',
-        
-        # WebClient (Spring WebFlux)
+        r'restTemplate\.(getForObject|getForEntity|postForObject|exchange)\s*\(\s*(url|uri|target|endpoint)\s*,',
+
+        # =====================================================================
+        # WEBCLIENT (SPRING WEBFLUX)
+        # =====================================================================
         r'webClient\.(get|post|put|delete)\s*\(\s*\)\.uri\s*\(.*request\.get',
+        r'webClient\.(get|post|put|delete)\s*\(\s*\)\.uri\s*\(\s*(url|uri|target|endpoint)\s*\)',
+        r'WebClient\.create\s*\(\s*(url|target|endpoint|userUrl)\s*\)',
+
+        # =====================================================================
+        # JSOUP (HTML PARSING WITH FETCH)
+        # =====================================================================
+        r'Jsoup\.connect\s*\(\s*request\.getParameter',
+        r'Jsoup\.connect\s*\(\s*(url|uri|target|endpoint|userUrl)\s*\)',
+        r'Jsoup\.connect\s*\(\s*.*\+',
     ],
     severity=Severity.HIGH,
-    languages=[".java", ".kt"],
-    false_positive_patterns=[
+    languages=[".java", ".kt", ".scala"],
+        false_positive_patterns=[
         r'UriComponentsBuilder.*whitelist',
-        r'isAllowedHost',
+        r'isAllowedHost\s*\(',
+        r'validateUrl\s*\(',
+        r'isValidUrl\s*\(',
+        r'ALLOWED_HOSTS',
+        r'allowedHosts\.contains',
+        r'\.getHost\s*\(\s*\)\.equals',
     ],
 ),
 
@@ -2546,45 +2940,128 @@ VulnerabilityPattern(
     name="SSRF - Dynamic URL Fetch (C#)",
     category=VulnCategory.SSRF,
     patterns=[
-        # HttpClient
+        # =====================================================================
+        # HTTPCLIENT
+        # =====================================================================
         r'HttpClient.*Get\w*Async\s*\(\s*.*Request\.(Query|Form|Body)',
         r'HttpClient.*Get\w*Async\s*\(\s*\$"',
         r'HttpClient.*Get\w*Async\s*\(\s*["\'].*\+',
         r'HttpClient.*Post\w*Async\s*\(\s*.*Request\.',
         r'HttpClient.*Send\w*Async\s*\(\s*.*Request\.',
         r'new\s+HttpClient\s*\(\s*\).*Get.*\(\s*.*\+',
-        
-        # WebClient (legacy)
+
+        # Variable-based
+        r'HttpClient.*Get\w*Async\s*\(\s*(url|uri|target|endpoint|userUrl|targetUrl)\s*[,\)]',
+        r'HttpClient.*Post\w*Async\s*\(\s*(url|uri|target|endpoint)\s*,',
+        r'\.GetAsync\s*\(\s*(url|uri|target|endpoint|userUrl)\s*\)',
+        r'\.PostAsync\s*\(\s*(url|uri|target|endpoint)\s*,',
+
+        # =====================================================================
+        # WEBCLIENT (LEGACY)
+        # =====================================================================
         r'WebClient.*Download\w*\s*\(\s*.*Request\.',
         r'WebClient.*Download\w*\s*\(\s*\$"',
         r'WebClient.*Upload\w*\s*\(\s*.*Request\.',
         r'new\s+WebClient\s*\(\s*\)\.Download.*\(\s*.*\+',
-        
-        # WebRequest
+
+        # Variable-based
+        r'WebClient.*Download\w*\s*\(\s*(url|uri|target|endpoint|userUrl)\s*[,\)]',
+        r'\.DownloadString\s*\(\s*(url|uri|target|endpoint)\s*\)',
+        r'\.DownloadData\s*\(\s*(url|uri|target|endpoint)\s*\)',
+
+        # =====================================================================
+        # WEBREQUEST
+        # =====================================================================
         r'WebRequest\.Create\s*\(\s*.*Request\.',
         r'WebRequest\.Create\s*\(\s*\$"',
         r'HttpWebRequest.*Create\s*\(\s*.*Request\.',
-        
-        # Uri construction
+
+        # Variable-based
+        r'WebRequest\.Create\s*\(\s*(url|uri|target|endpoint|userUrl)\s*\)',
+        r'HttpWebRequest\.Create\s*\(\s*(url|uri|target|endpoint)\s*\)',
+
+        # =====================================================================
+        # URI CONSTRUCTION
+        # =====================================================================
         r'new\s+Uri\s*\(\s*.*Request\.(Query|Form)',
         r'new\s+Uri\s*\(\s*\$".*\{.*Request\.',
-        
-        # RestSharp
+        r'new\s+Uri\s*\(\s*(url|uri|target|endpoint|userUrl|inputUrl)\s*\)',
+
+        # =====================================================================
+        # RESTSHARP
+        # =====================================================================
         r'RestClient\s*\(\s*.*Request\.',
         r'new\s+RestClient\s*\(\s*\$"',
         r'new\s+RestRequest\s*\(\s*.*Request\.',
+        r'new\s+RestClient\s*\(\s*(url|uri|target|endpoint|baseUrl|userUrl)\s*\)',
+        r'new\s+RestRequest\s*\(\s*(url|uri|target|endpoint)\s*[,\)]',
+
+        # =====================================================================
+        # FLURL
+        # =====================================================================
+        r'\.GetAsync\s*\(\s*\$"',
+        r'\.PostAsync\s*\(\s*\$"',
+        r'Url\s*=\s*\$".*\{.*Request\.',
     ],
     severity=Severity.HIGH,
-    languages=[".cs"],
-    false_positive_patterns=[
-        r'IsValidUri',
+    languages=[".cs", ".vb"],
+        false_positive_patterns=[
+        r'IsValidUri\s*\(',
+        r'IsWellFormedUri\s*\(',
+        r'ValidateUrl\s*\(',
         r'AllowedHosts',
+        r'AllowedDomains',
         r'Uri\.IsWellFormedUriString',
+        r'\.Host\s*==',
+        r'Configuration\[.*Url\]',           # Configuration URLs
+        r'Environment\.GetEnvironmentVariable.*[Uu]rl',  # Environment variables
     ],
 ),
+
+# =========================================================================
+# NEW: Generic SSRF Pattern for Variable-Based Taint (All Languages)
+# =========================================================================
+VulnerabilityPattern(
+    name="SSRF - Suspicious URL Variable Usage",
+    category=VulnCategory.SSRF,
+    patterns=[
+        # Generic pattern: function_that_fetches(url_variable)
+        # This catches cases where variable names suggest user-controlled URLs
+
+        # Python: any HTTP function with suspicious variable
+        r'(?:requests|urllib|httpx|aiohttp|http\.client)\.\w+\s*\(\s*'
+        r'(?:user_)?(?:url|uri|target|endpoint|link|href|callback|redirect|fetch|remote|external)(?:_url|_uri|_param|_input)?\s*[,\)]',
+
+        # JavaScript: fetch/axios/got with suspicious variable
+        r'(?:fetch|axios|got|request|superagent|needle)\s*(?:\.\w+\s*)?\(\s*'
+        r'(?:user)?(?:Url|Uri|Target|Endpoint|Link|Href|Callback|Redirect|Fetch|Remote|External)(?:Url|Uri|Param|Input)?\s*[,\)]',
+
+        # Assignment patterns that indicate taint flow
+        r'(?:url|uri|target|endpoint)\s*=\s*(?:req|request)\.',
+        r'(?:url|uri|target|endpoint)\s*=\s*(?:params|query|body|form|args|data)\[',
+        r'(?:url|uri|target|endpoint)\s*=\s*(?:params|query|body|form|args|data)\.get\s*\(',
+    ],
+    severity=Severity.MEDIUM,  # Lower severity as this has higher FP rate
+    languages=[".py", ".js", ".ts", ".jsx", ".tsx", ".php", ".java", ".cs", ".rb", ".go"],
+        false_positive_patterns=[
+        r'validate',
+        r'sanitize',
+        r'check.*url',
+        r'allowed',
+        r'whitelist',
+        r'allowlist',
+        r'localhost',
+        r'127\.0\.0\.1',
+        r'\.env',
+        r'config\.',
+        r'settings\.',
+    ],
+),
+
+
+
+
 ]
-
-
 # Binary patterns for DLL/EXE analysis
 BINARY_PATTERNS = [
     # =============================================================================
@@ -3189,8 +3666,8 @@ BINARY_PATTERNS = [
         "pattern": r'["\'][a-zA-Z0-9+/]{40,}={0,2}["\']',
         "severity": Severity.INFO
     }
-]
 
+]
 
 def get_platform() -> str:
     """Detect current platform"""
@@ -3215,12 +3692,12 @@ def find_ilspy() -> Optional[str]:
     """Find ILSpy/ilspycmd on the system"""
     # Check for ilspycmd (CLI version)
     ilspy_names = ["ilspycmd", "ilspy"]
-    
+
     for name in ilspy_names:
         path = shutil.which(name)
         if path:
             return path
-    
+
     # Common installation paths on Kali/Linux
     common_paths = [
         "/usr/bin/ilspycmd",
@@ -3229,11 +3706,11 @@ def find_ilspy() -> Optional[str]:
         os.path.expanduser("~/.dotnet/tools/ilspycmd"),
         "/root/.dotnet/tools/ilspycmd",
     ]
-    
+
     for path in common_paths:
         if os.path.exists(path):
             return path
-    
+
     return None
 
 
@@ -3241,18 +3718,18 @@ def find_dnspy() -> Optional[str]:
     """Find dnSpy on Windows"""
     if get_platform() != "windows":
         return None
-    
+
     common_paths = [
         r"C:\Tools\dnSpy\dnSpy.Console.exe",
         r"C:\Program Files\dnSpy\dnSpy.Console.exe",
         r"C:\dnSpy\dnSpy.Console.exe",
         os.path.expandvars(r"%USERPROFILE%\Tools\dnSpy\dnSpy.Console.exe"),
     ]
-    
+
     for path in common_paths:
         if os.path.exists(path):
             return path
-    
+
     # Check PATH
     dnspy = shutil.which("dnSpy.Console.exe") or shutil.which("dnSpy.Console")
     return dnspy
@@ -3260,17 +3737,17 @@ def find_dnspy() -> Optional[str]:
 
 class DotNetDecompiler:
     """Cross-platform .NET DLL decompiler"""
-    
+
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
         self.platform = get_platform()
         self.ilspy_path = find_ilspy()
         self.dnspy_path = find_dnspy()
-        
+
     def is_available(self) -> bool:
         """Check if decompiler is available"""
         return self.ilspy_path is not None or self.dnspy_path is not None
-    
+
     def get_tool_info(self) -> str:
         """Get info about available decompiler"""
         if self.ilspy_path:
@@ -3278,7 +3755,7 @@ class DotNetDecompiler:
         if self.dnspy_path:
             return f"dnSpy: {self.dnspy_path}"
         return "No .NET decompiler found"
-    
+
     def decompile(self, dll_path: str) -> Optional[str]:
         """Decompile DLL to C# source code"""
         if self.ilspy_path:
@@ -3290,33 +3767,33 @@ class DotNetDecompiler:
                 print("[!] No .NET decompiler available. Install ilspycmd:")
                 print("    dotnet tool install -g ilspycmd")
             return None
-    
+
     def _decompile_ilspy(self, dll_path: str) -> Optional[str]:
         """Decompile using ILSpy"""
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 output_dir = os.path.join(temp_dir, "decompiled")
                 os.makedirs(output_dir, exist_ok=True)
-                
+
                 cmd = [
                     self.ilspy_path,
                     dll_path,
                     "-o", output_dir,
                     "-p"  # Decompile to project
                 ]
-                
+
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
                     text=True,
                     timeout=120
                 )
-                
+
                 if result.returncode != 0:
                     # Try simpler command
                     cmd = [self.ilspy_path, dll_path, "-o", output_dir]
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-                
+
                 # Read all decompiled files
                 source_content = []
                 for root, _, files in os.walk(output_dir):
@@ -3329,44 +3806,44 @@ class DotNetDecompiler:
                                     source_content.append(f"// === {file} ===\n{content}")
                             except:
                                 pass
-                
+
                 if source_content:
                     return "\n\n".join(source_content)
-                
+
                 # Fallback: try to get output directly
                 if result.stdout:
                     return result.stdout
-                    
+
         except subprocess.TimeoutExpired:
             if self.verbose:
                 print(f"[!] Decompilation timeout for {dll_path}")
         except Exception as e:
             if self.verbose:
                 print(f"[!] ILSpy decompilation error: {e}")
-        
+
         return None
-    
+
     def _decompile_dnspy(self, dll_path: str) -> Optional[str]:
         """Decompile using dnSpy (Windows)"""
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 output_dir = os.path.join(temp_dir, "decompiled")
                 os.makedirs(output_dir, exist_ok=True)
-                
+
                 cmd = [
                     self.dnspy_path,
                     dll_path,
                     "--output", output_dir,
                     "--lang", "csharp"
                 ]
-                
+
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
                     text=True,
                     timeout=120
                 )
-                
+
                 # Read all decompiled files
                 source_content = []
                 for root, _, files in os.walk(output_dir):
@@ -3379,20 +3856,20 @@ class DotNetDecompiler:
                                     source_content.append(f"// === {file} ===\n{content}")
                             except:
                                 pass
-                
+
                 if source_content:
                     return "\n\n".join(source_content)
-                    
+
         except Exception as e:
             if self.verbose:
                 print(f"[!] dnSpy decompilation error: {e}")
-        
+
         return None
 
 
 class VulnerabilityScanner:
     """Advanced vulnerability scanner with binary analysis support"""
-    
+
     DEFAULT_EXCLUDE_DIRS = {
         'node_modules', '.git', '__pycache__', 'venv', 'env', '.venv',
         'dist', 'build', '.idea', '.vscode', 'vendor', 'target', 'bin',
@@ -3409,7 +3886,7 @@ class VulnerabilityScanner:
         # Demo/example code
         'demo', 'demos', 'example', 'examples', 'sample', 'samples',
     }
-    
+
     DEFAULT_EXCLUDE_FILES = {
         'package-lock.json', 'yarn.lock', 'composer.lock', 'Gemfile.lock',
         'poetry.lock', 'Cargo.lock', 'go.sum', 'pnpm-lock.yaml',
@@ -3464,18 +3941,18 @@ class VulnerabilityScanner:
         'dompdf.php',
         'recaptchalib.php',
     }
-    
+
     DEFAULT_EXCLUDE_PATTERNS = {
         '*.min.js', '*.min.css', '*.map', '*.bundle.js', '*.bundle.min.js',
         '*.test.js', '*.spec.js', '*.test.ts', '*.spec.ts',
         'test_*.py', '*_test.py', '*_test.go', '*_test.rb',
         '*.d.ts',
     }
-    
+
     BINARY_EXTENSIONS = {'.dll', '.exe', '.so', '.dylib', '.bin', '.o', '.a', '.lib'}
     ARCHIVE_EXTENSIONS = {'.jar', '.war', '.ear', '.zip', '.apk', '.aar', '.nupkg'}
     DOTNET_EXTENSIONS = {'.dll', '.exe'}
-    
+
     def __init__(
         self,
         verbose: bool = False,
@@ -3499,10 +3976,10 @@ class VulnerabilityScanner:
         self.scan_binaries = scan_binaries
         self.decompile_dotnet = decompile_dotnet
         self.platform = get_platform()
-        
+
         # Initialize decompiler if needed
         self.decompiler = DotNetDecompiler(verbose) if decompile_dotnet else None
-        
+
         # Category filtering
         self.active_categories: Optional[Set[VulnCategory]] = None
         if categories and "all" not in categories:
@@ -3521,7 +3998,7 @@ class VulnerabilityScanner:
                 "pollution": VulnCategory.PROTOTYPE_POLLUTION,
             }
             self.active_categories = {category_map[c] for c in categories if c in category_map}
-        
+
         # Exclusions
         if no_default_excludes:
             self.exclude_dirs: Set[str] = set()
@@ -3531,40 +4008,40 @@ class VulnerabilityScanner:
             self.exclude_dirs = self.DEFAULT_EXCLUDE_DIRS.copy()
             self.exclude_files = self.DEFAULT_EXCLUDE_FILES.copy()
             self.exclude_patterns = self.DEFAULT_EXCLUDE_PATTERNS.copy()
-        
+
         if exclude_dirs:
             self.exclude_dirs.update(exclude_dirs)
         if exclude_files:
             self.exclude_files.update(exclude_files)
         if exclude_patterns:
             self.exclude_patterns.update(exclude_patterns)
-        
+
         self.include_extensions = include_extensions
         self.exclude_extensions = exclude_extensions or set()
 
     def should_skip_path(self, file_path: str) -> bool:
         """Check if path should be skipped"""
         path = Path(file_path)
-        
+
         for part in path.parts:
             if part in self.exclude_dirs:
                 return True
-        
+
         if path.name in self.exclude_files:
             return True
-        
+
         for pattern in self.exclude_patterns:
             if fnmatch.fnmatch(path.name, pattern):
                 return True
-        
+
         ext = path.suffix.lower()
         if ext in self.exclude_extensions:
             return True
-        
+
         if self.include_extensions and ext not in self.include_extensions:
             if not (self.scan_binaries and ext in self.BINARY_EXTENSIONS):
                 return True
-        
+
         return False
 
     def get_relevant_extensions(self) -> Set[str]:
@@ -3590,7 +4067,7 @@ class VulnerabilityScanner:
     def extract_strings_from_binary(self, file_path: str, min_length: int = 4) -> List[Tuple[int, str]]:
         """Extract printable strings from binary file"""
         strings_found = []
-        
+
         # Try using 'strings' command (available on Kali/Linux and Windows with GNU tools)
         strings_cmd = "strings" if self.platform != "windows" else "strings.exe"
         try:
@@ -3599,7 +4076,7 @@ class VulnerabilityScanner:
                 capture_output=True,
                 text=True,
                 timeout=60
-            )
+    )
             if result.returncode == 0:
                 for idx, line in enumerate(result.stdout.split('\n'), 1):
                     if line.strip():
@@ -3607,15 +4084,15 @@ class VulnerabilityScanner:
                 return strings_found
         except (subprocess.SubprocessError, FileNotFoundError):
             pass
-        
+
         # Fallback: manual extraction
         try:
             with open(file_path, 'rb') as f:
                 data = f.read()
-            
+
             current_string = []
             string_start = 0
-            
+
             for i, byte in enumerate(data):
                 if 32 <= byte <= 126:
                     if not current_string:
@@ -3625,32 +4102,32 @@ class VulnerabilityScanner:
                     if len(current_string) >= min_length:
                         strings_found.append((string_start, ''.join(current_string)))
                     current_string = []
-            
+
             if len(current_string) >= min_length:
                 strings_found.append((string_start, ''.join(current_string)))
-                
+
         except Exception as e:
             if self.verbose:
                 print(f"[!] Error reading binary {file_path}: {e}")
-        
+
         return strings_found
 
     def scan_decompiled_source(self, source: str, original_file: str) -> List[Finding]:
         """Scan decompiled C# source for vulnerabilities"""
         findings = []
         lines = source.split('\n')
-        
+
         for line_num, line in enumerate(lines, 1):
             if not line.strip():
                 continue
-            
+
             for vuln_pattern in VULNERABILITY_PATTERNS:
                 if self.active_categories and vuln_pattern.category not in self.active_categories:
                     continue
-                
+
                 if ".cs" not in vuln_pattern.languages:
                     continue
-                
+
                 for pattern in vuln_pattern.patterns:
                     try:
                         if re.search(pattern, line, re.IGNORECASE):
@@ -3670,32 +4147,32 @@ class VulnerabilityScanner:
                                 break
                     except re.error:
                         continue
-        
+
         return findings
 
     def scan_binary(self, file_path: str) -> List[Finding]:
         """Scan a binary file for suspicious patterns"""
         findings = []
-        
+
         if self.verbose:
             print(f"[*] Analyzing binary: {file_path}")
-        
+
         # For .NET binaries, try decompilation first
         if self.decompile_dotnet and self.is_dotnet_binary(file_path) and self.decompiler:
             if self.decompiler.is_available():
                 if self.verbose:
                     print(f"[*] Decompiling with {self.decompiler.get_tool_info()}")
-                
+
                 source = self.decompiler.decompile(file_path)
                 if source:
                     findings.extend(self.scan_decompiled_source(source, file_path))
                     if findings:
                         self.binaries_scanned += 1
                         return findings
-        
+
         # Fallback to string extraction
         strings = self.extract_strings_from_binary(file_path)
-        
+
         for offset, string_content in strings:
             for pattern_info in BINARY_PATTERNS:
                 try:
@@ -3710,17 +4187,17 @@ class VulnerabilityScanner:
                         ))
                 except re.error:
                     continue
-        
+
         self.binaries_scanned += 1
         return findings
 
     def scan_archive(self, archive_path: str) -> List[Finding]:
         """Scan archive for vulnerabilities"""
         findings = []
-        
+
         if self.verbose:
             print(f"[*] Analyzing archive: {archive_path}")
-        
+
         try:
             with zipfile.ZipFile(archive_path, 'r') as zf:
                 for file_info in zf.filelist:
@@ -3728,20 +4205,20 @@ class VulnerabilityScanner:
                         continue
                     if file_info.filename.endswith('/'):
                         continue
-                    
+
                     try:
                         content = zf.read(file_info.filename)
-                        
+
                         try:
                             text_content = content.decode('utf-8', errors='ignore')
                             lines = text_content.split('\n')
-                            
+
                             inner_ext = Path(file_info.filename).suffix.lower()
-                            
+
                             for line_num, line in enumerate(lines, 1):
                                 if not line.strip():
                                     continue
-                                
+
                                 # Check binary patterns
                                 for pattern_info in BINARY_PATTERNS:
                                     try:
@@ -3756,13 +4233,13 @@ class VulnerabilityScanner:
                                             ))
                                     except re.error:
                                         continue
-                                
+
                                 # Check vuln patterns for source files
                                 if inner_ext in {'.java', '.kt', '.scala', '.cs', '.xml', '.properties', '.yml', '.yaml', '.json', '.js', '.py'}:
                                     for vuln_pattern in VULNERABILITY_PATTERNS:
                                         if self.active_categories and vuln_pattern.category not in self.active_categories:
                                             continue
-                                        
+
                                         for pattern in vuln_pattern.patterns:
                                             try:
                                                 if re.search(pattern, line, re.IGNORECASE):
@@ -3789,7 +4266,7 @@ class VulnerabilityScanner:
         except Exception as e:
             if self.verbose:
                 print(f"[!] Error processing archive {archive_path}: {e}")
-        
+
         return findings
 
     def scan_line(self, line: str, line_number: int, file_path: str,
@@ -3797,7 +4274,7 @@ class VulnerabilityScanner:
         """Scan a line for vulnerabilities"""
         findings = []
         stripped = line.strip()
-        
+
         # Skip commented lines based on file type
         if extension in ['.py', '.rb', '.sh', '.bash', '.yaml', '.yml']:
             if stripped.startswith('#'):
@@ -3808,14 +4285,14 @@ class VulnerabilityScanner:
         elif extension in ['.php']:
             if stripped.startswith('//') or stripped.startswith('#') or stripped.startswith('/*') or stripped.startswith('*'):
                 return findings
-        
+
         for vuln_pattern in VULNERABILITY_PATTERNS:
             if self.active_categories and vuln_pattern.category not in self.active_categories:
                 continue
-            
+
             if extension not in vuln_pattern.languages:
                 continue
-            
+
             for pattern in vuln_pattern.patterns:
                 try:
                     if re.search(pattern, line, re.IGNORECASE):
@@ -3823,7 +4300,7 @@ class VulnerabilityScanner:
                             re.search(fp, line, re.IGNORECASE)
                             for fp in vuln_pattern.false_positive_patterns
                         )
-                        
+
                         if not is_false_positive:
                             findings.append(Finding(
                                 file_path=file_path,
@@ -3836,7 +4313,7 @@ class VulnerabilityScanner:
                             break
                 except re.error:
                     continue
-        
+
         return findings
 
     def scan_file(self, file_path: str) -> List[Finding]:
@@ -3845,64 +4322,64 @@ class VulnerabilityScanner:
             if self.scan_binaries:
                 return self.scan_archive(file_path)
             return []
-        
+
         if self.is_binary_file(file_path):
             if self.scan_binaries:
                 return self.scan_binary(file_path)
             return []
-        
+
         extension = Path(file_path).suffix.lower()
         if extension not in self.get_relevant_extensions():
             return []
-        
+
         findings = []
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
-            
+
             for line_number, line in enumerate(lines, 1):
                 findings.extend(self.scan_line(line, line_number, file_path, extension))
         except (IOError, PermissionError) as e:
             if self.verbose:
                 print(f"[!] Error reading {file_path}: {e}")
-        
+
         return findings
 
     def scan_directory(self, directory: str) -> List[Finding]:
         """Recursively scan directory"""
         all_findings = []
-        
+
         for root, dirs, files in os.walk(directory):
             dirs[:] = [d for d in dirs if d not in self.exclude_dirs]
-            
+
             for file in files:
                 file_path = os.path.join(root, file)
-                
+
                 if self.should_skip_path(file_path):
                     self.files_skipped += 1
                     continue
-                
+
                 ext = Path(file_path).suffix.lower()
                 is_binary = ext in self.BINARY_EXTENSIONS
                 is_archive = ext in self.ARCHIVE_EXTENSIONS
-                
+
                 if not is_binary and not is_archive and ext not in self.get_relevant_extensions():
                     continue
-                
+
                 if (is_binary or is_archive) and not self.scan_binaries:
                     continue
-                
+
                 self.files_scanned += 1
-                
+
                 if self.verbose:
                     ftype = "archive" if is_archive else ("binary" if is_binary else "source")
                     print(f"[*] Scanning ({ftype}): {file_path}")
-                
+
                 file_findings = self.scan_file(file_path)
                 if file_findings:
                     self.files_with_findings.add(file_path)
                     all_findings.extend(file_findings)
-        
+
         self.findings = all_findings
         self._calculate_stats()
         return all_findings
@@ -3928,7 +4405,7 @@ class VulnerabilityScanner:
             "by_category": {},
             "by_severity": {},
         }
-        
+
         for finding in self.findings:
             cat = finding.category.value
             self.stats["by_category"][cat] = self.stats["by_category"].get(cat, 0) + 1
@@ -3951,7 +4428,7 @@ class VulnerabilityScanner:
         lines.append(f"Files scanned: {self.files_scanned} | Binaries: {self.binaries_scanned}")
         lines.append(f"Total findings: {len(self.findings)}")
         lines.append("")
-        
+
         # Severity summary
         for sev in [Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.INFO]:
             count = self.stats["by_severity"].get(sev.value, 0)
@@ -3959,26 +4436,26 @@ class VulnerabilityScanner:
                 lines.append(f"  {sev.value:10}: {count}")
         lines.append("")
         lines.append("=" * 80)
-        
+
         # Group by file
         findings_by_file = {}
         for f in self.findings:
             findings_by_file.setdefault(f.file_path, []).append(f)
-        
+
         severity_order = {s: i for i, s in enumerate([Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.INFO])}
-        
+
         for file_path, file_findings in sorted(findings_by_file.items()):
             file_findings.sort(key=lambda x: (severity_order.get(x.severity, 99), x.line_number))
-            
+
             lines.append("")
             lines.append(f"FILE: {file_path}")
             lines.append("-" * 80)
-            
+
             for f in file_findings:
                 lines.append(f"[{f.severity.value}] {f.vulnerability_name}")
                 lines.append(f"  Line {f.line_number}: {f.line_content}")
                 lines.append("")
-        
+
         return "\n".join(lines)
 
     def _generate_json_report(self) -> str:
@@ -4023,36 +4500,36 @@ Examples:
   Install: dotnet tool install -g ilspycmd
         """
     )
-    
+
     parser.add_argument("target", help="File or directory to scan")
     parser.add_argument("-o", "--output-file", help="Output file path")
     parser.add_argument("--output", choices=["text", "json"], default="text")
     parser.add_argument("-v", "--verbose", action="store_true")
-    
+
     parser.add_argument(
         "--category", "-c", nargs="+",
         choices=["sql", "postgresql", "nosql", "xpath", "deserialization", "auth", "ssti", "ssrf", "code", "eval", "prototype", "pollution", "all"],
         default=["all"], help="Categories to scan"
     )
-    
+
     parser.add_argument("--scan-binaries", "-b", action="store_true",
                         help="Enable DLL/EXE/SO/JAR analysis")
     parser.add_argument("--decompile", "-d", action="store_true",
                         help="Decompile .NET DLLs using ILSpy/dnSpy")
-    
+
     parser.add_argument("--exclude-dir", nargs="+", default=[])
     parser.add_argument("--exclude-file", nargs="+", default=[])
     parser.add_argument("--exclude-pattern", nargs="+", default=[])
     parser.add_argument("--exclude-ext", nargs="+", default=[])
     parser.add_argument("--include-ext", nargs="+", default=[])
     parser.add_argument("--no-default-excludes", action="store_true")
-    
+
     args = parser.parse_args()
-    
+
     if not os.path.exists(args.target):
         print(f"[!] Error: Target not found: {args.target}")
         return 1
-    
+
     # ASCII Banner
     banner = """
 ░█░█░█▀█░█▀▄░█░░░█▀▄░▀█▀░█▀▄░█▀▀░█▀▀░█▀▄░█▀█░█░█
@@ -4065,12 +4542,12 @@ Examples:
                       by worldtreeboy
     """
     print(banner)
-    
+
     current_platform = get_platform()
     print(f"[*] Platform: {current_platform.upper()}")
     print(f"[*] Target: {args.target}")
     print(f"[*] Categories: {', '.join(args.category)}")
-    
+
     if args.scan_binaries:
         print(f"[*] Binary analysis: ENABLED")
     if args.decompile:
@@ -4081,7 +4558,7 @@ Examples:
             print(f"[!] .NET Decompiler: NOT FOUND")
             print(f"    Install with: dotnet tool install -g ilspycmd")
     print("")
-    
+
     scanner = VulnerabilityScanner(
         verbose=args.verbose,
         exclude_dirs=set(args.exclude_dir) if args.exclude_dir else None,
@@ -4094,19 +4571,19 @@ Examples:
         decompile_dotnet=args.decompile,
         categories=args.category
     )
-    
+
     scanner.scan_target(args.target)
     report = scanner.generate_report(args.output)
-    
+
     if args.output_file:
         with open(args.output_file, 'w', encoding='utf-8') as f:
             f.write(report)
         print(f"[*] Report saved: {args.output_file}")
     else:
         print(report)
-    
+
     print(f"\n[*] Scan complete: {scanner.files_scanned} files, {len(scanner.findings)} findings")
-    
+
     if scanner.stats["by_severity"].get("CRITICAL", 0):
         return 2
     elif scanner.stats["by_severity"].get("HIGH", 0):
