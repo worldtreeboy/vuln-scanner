@@ -1302,234 +1302,1233 @@ VulnerabilityPattern(
         r'\?\s*[,\)]',
     ],
 ),
-    # =========================================================================
-    # NOSQL INJECTION PATTERNS
-    # =========================================================================
-    # =========================================================================
-# NOSQL INJECTION PATTERNS - IMPROVED
+# =========================================================================
+# NOSQL INJECTION PATTERNS - ENTERPRISE GRADE COMPREHENSIVE DETECTION
+# =========================================================================
+# Version: 2.0
+# Coverage: MongoDB, Redis, CouchDB, Cassandra, DynamoDB, Elasticsearch,
+#           Firebase, Neo4j, ArangoDB, RethinkDB, OrientDB
+# Languages: JavaScript, TypeScript, Python, PHP, Ruby, Java, C#, Go, Kotlin
 # =========================================================================
 
+# =============================================================================
+# MONGODB INJECTION PATTERNS
+# =============================================================================
+
 VulnerabilityPattern(
-    name="NoSQL Injection - Tainted Input in Query",
+    name="NoSQL Injection - MongoDB Tainted Input (JavaScript/TypeScript)",
     category=VulnCategory.NOSQL_INJECTION,
     patterns=[
         # =====================================================================
-        # JAVASCRIPT/TYPESCRIPT - Express.js patterns
+        # EXPRESS.JS / NODE.JS - Direct Request Object Usage
         # =====================================================================
-
-        # Catches: .find({ user: req.query.name }), .findOne({ email: req.body.email })
+        
+        # Basic CRUD with req object - covers all MongoDB methods
+        r'\.(find|findOne|findMany|findById|findByIdAndUpdate|findByIdAndDelete|findByIdAndRemove|'
+        r'findOneAndUpdate|findOneAndDelete|findOneAndRemove|findOneAndReplace|'
+        r'update|updateOne|updateMany|replaceOne|'
+        r'delete|deleteOne|deleteMany|remove|'
+        r'aggregate|count|countDocuments|estimatedDocumentCount|distinct|'
+        r'bulkWrite|insertOne|insertMany|'
+        r'watch|changeStream)\s*\(\s*\{[^}]*:\s*req\.(body|query|params|cookies|headers|session|user)',
+        
+        # Passing entire req object properties as query
+        r'\.(find|findOne|findMany|aggregate|countDocuments|distinct|watch)\s*\(\s*req\.(body|query|params)\s*[,\)]',
+        
+        # Object spread/destructuring of user input
         r'\.(find|findOne|findMany|update|updateOne|updateMany|delete|deleteOne|deleteMany|'
-        r'aggregate|count|countDocuments|distinct|findOneAnd(?:Update|Delete|Replace|Remove)|'
-        r'replaceOne|bulkWrite)\s*\(\s*\{[^}]*:\s*req\.(body|query|params|cookies|headers)',
-
-        # Catches: .find(req.body), .findOne(req.query) - passing raw user input as query
-        r'\.(find|findOne|findMany|countDocuments|aggregate|distinct|watch)\s*\(\s*req\.(body|query|params)\s*[,\)]',
-
-        # Catches: .find({ ...req.body }) - object spread of user input
-        r'\.(find|findOne|findMany|update|updateOne|updateMany|delete|deleteOne|deleteMany|'
-        r'aggregate|findOneAnd\w*)\s*\(\s*\{\s*\.\.\.req\.(body|query|params)',
-
-        # Catches: $where with string concatenation or template literals
-        r'\$where\s*:\s*[`"\'].*(\+|\$\{|req\.)',
-
-        # Catches: collection[method](userInput) dynamic method calls
-        r'(?:collection|db\.\w+)\s*\[\s*req\.(body|query|params)',
-
-        # Catches: db[req.body.collection].find() - dynamic collection access
+        r'aggregate|findOneAnd\w*|replaceOne)\s*\(\s*\{\s*\.\.\.req\.(body|query|params)',
+        
+        # Template literals in queries
+        r'\.(find|findOne|aggregate)\s*\(\s*\{[^}]*:\s*`[^`]*\$\{[^}]*req\.',
+        
+        # Dynamic property access
+        r'\.(find|findOne|aggregate)\s*\(\s*\{[^}]*\[\s*req\.(body|query|params)',
+        
+        # =====================================================================
+        # MONGOOSE SPECIFIC PATTERNS
+        # =====================================================================
+        
+        # Model methods with user input
+        r'Model\.(find|findOne|findById|findOneAndUpdate|findOneAndDelete|'
+        r'updateOne|updateMany|deleteOne|deleteMany|countDocuments|'
+        r'exists|where|aggregate)\s*\([^)]*req\.(body|query|params)',
+        
+        # Mongoose where() chaining with user input
+        r'\.where\s*\(\s*req\.(body|query|params)',
+        r'\.where\s*\(\s*["\'][^"\']+["\']\s*\)\s*\.(equals|ne|gt|gte|lt|lte|in|nin|regex)\s*\(\s*req\.',
+        
+        # Mongoose Query builder with tainted input
+        r'\.find\s*\(\s*\)\s*\.(where|equals|or|and|nor|select|sort|limit|skip)\s*\(\s*req\.',
+        
+        # Mongoose lean() queries (common pattern)
+        r'\.find\s*\([^)]*req\.(body|query|params)[^)]*\)\s*\.lean\s*\(',
+        
+        # Mongoose exec() with tainted query
+        r'\.find\s*\([^)]*req\.(body|query|params)[^)]*\)\s*\.exec\s*\(',
+        
+        # Mongoose populate with user input (can leak data)
+        r'\.populate\s*\(\s*req\.(body|query|params)',
+        
+        # =====================================================================
+        # MONGODB NATIVE DRIVER PATTERNS
+        # =====================================================================
+        
+        # Collection methods
+        r'collection\s*\(\s*[^)]+\s*\)\s*\.(find|findOne|insertOne|insertMany|'
+        r'updateOne|updateMany|deleteOne|deleteMany|aggregate|countDocuments|'
+        r'distinct|findOneAndUpdate|findOneAndDelete|findOneAndReplace|'
+        r'bulkWrite|watch)\s*\(\s*[^)]*req\.(body|query|params)',
+        
+        # db.collection pattern
+        r'db\s*\.\s*collection\s*\(\s*[^)]+\s*\)\s*\.\w+\s*\(\s*[^)]*req\.',
+        
+        # Dynamic collection name from user input (CRITICAL)
         r'db\s*\[\s*req\.(body|query|params)',
-
-        # Catches: MongoDB operators from user input: { $gt: req.body.value }
-        r'\{\s*\$(?:gt|gte|lt|lte|ne|eq|in|nin|or|and|not|nor|regex|where|expr|'
-        r'elemMatch|all|size|exists|type|mod|text|search)\s*:\s*req\.(body|query|params)',
-
-        # Catches: Dynamic operator key from user input { [req.body.op]: value }
-        r'\{\s*\[\s*req\.(body|query|params)',
-
-        # Catches: eval-like patterns in Mongoose/MongoDB
-        r'\.(?:mapReduce|group)\s*\(\s*[^)]*req\.(body|query|params)',
-
-        # Catches: Variable-based taint (common variable names for user input)
-        r'\.(find|findOne|findMany|aggregate|update\w*|delete\w*)\s*\(\s*'
-        r'(userInput|queryObj|filterObj|searchQuery|userQuery|clientData|requestBody|reqBody)\s*[,\)]',
-
+        r'db\s*\.\s*collection\s*\(\s*req\.(body|query|params)',
+        r'mongoose\s*\.\s*connection\s*\.\s*collection\s*\(\s*req\.',
+        
         # =====================================================================
-        # PYTHON - PyMongo / Motor patterns (THIS IS WHAT YOU WERE MISSING!)
+        # MONGODB OPERATORS FROM USER INPUT
         # =====================================================================
-
-        # Catches: collection.find({"user": request_var}), db.users.find(query_val)
-        r'\.find\s*\(\s*\{[^}]*:\s*\w*(request|query|param|user_input|data|payload|input_)',
-
-        # Catches: db.collection.find(variable) - variable passed directly
-        r'(?:db|client|mongo|collection)\.\w+\.(?:find|find_one|update|update_one|update_many|'
-        r'delete_one|delete_many|aggregate|count_documents|distinct)\s*\(\s*'
-        r'(?![\'\"\{])([a-zA-Z_]\w*)\s*[,\)]',
-
-        # Catches: collection.find(request.args), collection.find_one(request.form)
-        r'\.(?:find|find_one|find_many|update_one|update_many|delete_one|delete_many|'
-        r'aggregate|count_documents|distinct|replace_one)\s*\(\s*'
-        r'request\.(args|form|json|values|data|get_json)',
-
-        # Catches: .find({"field": request.args.get("param")})
-        r'\.(?:find|find_one|aggregate)\s*\(\s*\{[^}]*:\s*request\.(args|form|json)',
-
-        # Catches: Flask/Django patterns - request.GET, request.POST, request.data
-        r'\.(?:find|find_one|update|delete|aggregate)\w*\s*\(\s*\{[^}]*:\s*request\.(GET|POST|data)',
-
-        # Catches: PyMongo with f-string or .format() in query (string injection)
-        r'\.(?:find|find_one|aggregate)\s*\(\s*f["\']',
-        r'\.(?:find|find_one|aggregate)\s*\(\s*["\'][^"\']*\{.*\}[^"\']*["\']\.format',
-
-        # Catches: eval/exec with mongo (very dangerous)
-        r'(?:eval|exec)\s*\([^)]*(?:find|mongo|collection)',
-
+        
+        # Comparison operators
+        r'\{\s*\$(?:eq|ne|gt|gte|lt|lte)\s*:\s*req\.(body|query|params)',
+        
+        # Array operators
+        r'\{\s*\$(?:in|nin|all|elemMatch|size)\s*:\s*req\.(body|query|params)',
+        
+        # Logical operators
+        r'\{\s*\$(?:or|and|not|nor)\s*:\s*\[?\s*req\.(body|query|params)',
+        
+        # Evaluation operators (CRITICAL - can execute code)
+        r'\{\s*\$(?:where|expr|regex|text|mod|jsonSchema)\s*:\s*req\.(body|query|params)',
+        
+        # Update operators from user input
+        r'\{\s*\$(?:set|unset|inc|mul|rename|min|max|currentDate|'
+        r'addToSet|pop|pull|push|pullAll|each|position|slice|sort)\s*:\s*[^}]*req\.(body|query|params)',
+        
+        # Aggregation pipeline from user input (CRITICAL)
+        r'\.aggregate\s*\(\s*\[\s*\{\s*\$\w+\s*:\s*[^}]*req\.(body|query|params)',
+        r'\.aggregate\s*\(\s*req\.(body|query|params)',
+        
         # =====================================================================
-        # PYTHON - Variable taint tracking (common patterns)
+        # $WHERE OPERATOR (JAVASCRIPT EXECUTION - CRITICAL)
         # =====================================================================
-
-        # Catches: query_val used in .find() - tracks common variable naming
-        r'\.(?:find|find_one|aggregate|update_one|delete_one)\s*\(\s*'
-        r'(?:\{[^}]*:\s*)?(query_val|user_val|input_val|param_val|search_val|'
-        r'user_input|user_data|query_data|form_data|request_data|payload|'
-        r'filter_dict|query_dict|search_query|user_query)',
-
-        # Catches: Generic dict variable in find() that might be tainted
-        # This has higher false positive rate but catches: items.find({"user": query_val})
-        r'db\.\w+\.find\s*\(\s*\{[^}]*:\s*[a-z_]+_val\}?\s*\)',
-
+        
+        r'\$where\s*:\s*[^,}]*req\.(body|query|params)',
+        r'\$where\s*:\s*["\'][^"\']*\+',
+        r'\$where\s*:\s*`[^`]*\$\{',
+        r'\$where\s*:\s*function\s*\([^)]*\)\s*\{[^}]*(?:req\.|request\.|params|this\.\w+\s*==\s*[^"\']+)',
+        r'"\$where"\s*:\s*[^,}]*(?:req\.|request\.|params|user)',
+        r"'\$where'\s*:\s*[^,}]*(?:req\.|request\.|params|user)",
+        
         # =====================================================================
-        # PHP - MongoDB patterns
+        # DYNAMIC OPERATOR KEYS (OPERATOR INJECTION)
         # =====================================================================
-
-        # Catches: $collection->find(['user' => $_GET['user']])
-        r'->\s*(?:find|findOne|updateOne|deleteOne|aggregate)\s*\(\s*\[[^\]]*=>\s*\$_(GET|POST|REQUEST|COOKIE)',
-
-        # Catches: $collection->find($_POST)
-        r'->\s*(?:find|findOne|aggregate)\s*\(\s*\$_(GET|POST|REQUEST)',
-
+        
+        # User controls the operator name
+        r'\{\s*\[\s*req\.(body|query|params)\s*\]\s*:',
+        r'\{\s*\[.*\]\s*:\s*req\.(body|query|params)',
+        
+        # String concatenation for operator
+        r'\{\s*["\']?\s*\$\s*["\']?\s*\+\s*req\.(body|query|params)',
+        r'\{\s*`\$\{req\.(body|query|params)',
+        
         # =====================================================================
-        # Ruby - Mongoid / mongo-ruby-driver patterns
+        # COMMON TAINTED VARIABLE PATTERNS
         # =====================================================================
-
-        # Catches: Model.where(params[:field])
-        r'\.(?:where|find|find_by|update|delete)\s*\(\s*params\s*\[',
-
-        # Catches: collection.find(params.permit(...).to_h)
-        r'\.find\s*\(\s*params',
-
+        
+        r'\.(find|findOne|aggregate|update\w*|delete\w*)\s*\(\s*'
+        r'(userInput|queryObj|filterObj|searchQuery|userQuery|clientData|'
+        r'requestBody|reqBody|queryParams|userFilter|searchFilter|'
+        r'userSearch|clientQuery|inputQuery|rawQuery|unsafeQuery)\s*[,\)]',
+        
         # =====================================================================
-        # Java - MongoDB Java Driver patterns
+        # GRAPHQL + MONGODB PATTERNS
         # =====================================================================
-
-        # Catches: collection.find(Filters.eq("field", request.getParameter()))
-        r'\.find\s*\(\s*(?:Filters\.\w+\s*\([^)]*)?request\.getParameter',
-
-        # Catches: BasicDBObject with request parameter
-        r'new\s+BasicDBObject\s*\([^)]*request\.getParameter',
-
-        # Catches: Document.parse with user input
-        r'Document\.parse\s*\(\s*(?:request|param|input|user)',
+        
+        r'args\s*\.\s*\w+\s*.*\.(find|findOne|aggregate)\s*\(',
+        r'context\s*\.\s*req\s*\..*\.(find|findOne|aggregate)\s*\(',
+        r'input\s*\.\s*\w+\s*.*\.(find|findOne|aggregate)\s*\(',
     ],
     severity=Severity.CRITICAL,
-    languages=[".js", ".ts", ".jsx", ".tsx", ".mjs", ".py", ".php", ".rb", ".java"],
-        false_positive_patterns=[
-        r'findById\s*\(',                           # Mongoose casts to ObjectId
-        r'params\.id\s*\)',                         # Single ID lookups are generally safe
-        r'Types\.ObjectId\s*\(',                    # Explicit ObjectId casting
-        r'mongoose\.Types\.ObjectId',               # Explicit ObjectId casting
-        r'new\s+ObjectId\s*\(',                     # Explicit ObjectId casting
-        r'ObjectId\.isValid\s*\(',                  # Validation before use
-        r'bson\.ObjectId\s*\(',                     # Python BSON ObjectId
-        r'sanitize\w*\s*\(',                        # Using sanitization
-        r'escape\w*\s*\(',                          # Using escaping
-        r'validator\.\w+',                          # Using validator library
-        r'wtforms',                                 # WTForms validation (Python)
-        r'marshmallow',                             # Marshmallow schema validation
-        r'pydantic',                                # Pydantic validation
-        r'Joi\.',                                   # Joi validation (JS)
-        r'yup\.',                                   # Yup validation (JS)
-        r'zod\.',                                   # Zod validation (JS)
-        r'express-validator',                       # Express validator
-        r'mongo-sanitize',                          # Mongo sanitize library
-        r'int\s*\(',                                # Python int casting
-        r'str\s*\(',                                # Python str casting (partial mitigation)
-        r'isinstance\s*\([^,]+,\s*(?:int|str|float)\)', # Type checking
+    languages=[".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"],
+    false_positive_patterns=[
+        r'findById\s*\(\s*req\.params\.id\s*\)',      # Single ID lookup with Mongoose
+        r'Types\.ObjectId\s*\(',                       # Explicit ObjectId casting
+        r'mongoose\.Types\.ObjectId',                  # Mongoose ObjectId
+        r'new\s+ObjectId\s*\(',                        # MongoDB ObjectId
+        r'ObjectId\.isValid\s*\(',                     # Validation
+        r'ObjectId\.createFromHexString\s*\(',         # Safe creation
+        r'sanitize\w*\s*\(',                           # Sanitization
+        r'escape\w*\s*\(',                             # Escaping
+        r'validator\.\w+',                             # Validator library
+        r'Joi\.\w+',                                   # Joi validation
+        r'yup\.\w+',                                   # Yup validation
+        r'zod\.\w+',                                   # Zod validation
+        r'express-validator',                          # Express validator
+        r'mongo-sanitize',                             # Mongo sanitize
+        r'sanitize-mongo',                             # Another sanitizer
+        r'express-mongo-sanitize',                     # Express middleware
+        r'\.isMongoId\s*\(',                           # Validator check
+        r'isValidObjectId\s*\(',                       # Custom validation
+        r'parseInt\s*\(\s*req\.',                      # Parsing to int
+        r'Number\s*\(\s*req\.',                        # Casting to number
+        r'String\s*\(\s*req\.',                        # Casting to string (partial)
+        r'Boolean\s*\(\s*req\.',                       # Casting to boolean
+        r'\.trim\s*\(\s*\)\s*$',                       # Just trimming
     ],
 ),
 
 VulnerabilityPattern(
-    name="NoSQL Injection - MongoDB $where Operator",
+    name="NoSQL Injection - MongoDB Tainted Input (Python)",
     category=VulnCategory.NOSQL_INJECTION,
     patterns=[
-        # Basic $where detection (code smell)
-        r'\$where\s*:',
-        r'"\$where"\s*:',
-        r"'\$where'\s*:",
-
-        # $where with user input (CRITICAL)
-        r'\$where\s*:\s*[^,}]*(?:req\.|request\.|params|query|user_input|input)',
-
-        # $where with string concatenation
-        r'\$where\s*:\s*["\'][^"\']*\s*\+',
-        r'\$where\s*:\s*[`][^`]*\$\{',
-
-        # $where with f-string (Python)
-        r'\$where\s*:\s*f["\']',
-
-        # JavaScript function in $where with external variable
-        r'\$where\s*:\s*function\s*\([^)]*\)\s*\{[^}]*(?:req\.|request\.|params|this\.\w+\s*==\s*[^"\']+)',
-    ],
-    severity=Severity.HIGH,
-    languages=[".js", ".ts", ".jsx", ".tsx", ".py", ".php", ".java", ".rb", ".cs"],
-        false_positive_patterns=[
-        r'\$where\s*:\s*function\s*\(\)\s*\{\s*return\s+(true|false)\s*;?\s*\}',  # Static boolean return
-        r'\$where\s*:\s*["\']this\.\w+\s*[<>=!]+\s*\d+["\']',  # Hardcoded numeric comparison
-        r'#.*\$where',  # Commented out
-        r'//.*\$where',  # Commented out
-    ],
-),
-
-# =========================================================================
-# NEW: Additional NoSQL Pattern for Python-specific cases
-# =========================================================================
-
-VulnerabilityPattern(
-    name="NoSQL Injection - PyMongo/Motor Tainted Query",
-    category=VulnCategory.NOSQL_INJECTION,
-    patterns=[
-        # Catches the EXACT pattern from your test:
-        # client.db.items.find({"user": query_val})
-        r'(?:client|mongo|db)\.\w+\.\w+\.(?:find|find_one|aggregate|update|delete)\s*\(\s*\{[^}]*:\s*[a-z_]+(?:_val|_input|_data|_param)\s*\}',
-
-        # Catches: collection.find(filter_var) where filter comes from request
-        r'\.(?:find|find_one|aggregate)\s*\(\s*(?:[a-z_]+(?:filter|query|search|param|input|data))\s*[,\)]',
-
-        # Flask specific: request.args.get(), request.form.get()
+        # =====================================================================
+        # PYMONGO PATTERNS
+        # =====================================================================
+        
+        # Direct request object usage (Flask)
+        r'\.(?:find|find_one|find_one_and_update|find_one_and_delete|find_one_and_replace|'
+        r'update_one|update_many|delete_one|delete_many|replace_one|'
+        r'aggregate|count_documents|estimated_document_count|distinct|'
+        r'insert_one|insert_many|bulk_write)\s*\(\s*[^)]*request\.(args|form|json|data|values|get_json|files)',
+        
+        # request.args.get(), request.form.get() patterns
         r'\.(?:find|find_one|aggregate|update_one|delete_one)\s*\([^)]*request\.(?:args|form|json|data)\.get\s*\(',
-
-        # Catches: {"$regex": variable} pattern
-        r'\{\s*["\']?\$(?:regex|where|expr)["\']?\s*:\s*[a-z_]\w*\s*\}',
-
-        # Catches dict unpacking: .find({**user_dict})
-        r'\.(?:find|find_one|aggregate)\s*\(\s*\{\s*\*\*\s*[a-z_]\w*\s*\}',
-
-        # Motor (async MongoDB) patterns
-        r'await\s+\w+\.(?:find|find_one|aggregate|update_one|delete_one)\s*\([^)]*request',
-
-        # Catches: json.loads() result used directly in query
-        r'\.(?:find|find_one)\s*\(\s*json\.loads\s*\(',
+        r'\.(?:find|find_one|aggregate)\s*\(\s*\{[^}]*:\s*request\.(?:args|form|json)\.get\s*\(',
+        
+        # Django request patterns
+        r'\.(?:find|find_one|update|delete|aggregate)\w*\s*\(\s*[^)]*request\.(GET|POST|data|body|COOKIES|META)',
+        r'\.(?:find|find_one|aggregate)\s*\(\s*\{[^}]*:\s*request\.(GET|POST|data)\s*\[',
+        r'\.(?:find|find_one|aggregate)\s*\(\s*\{[^}]*:\s*request\.(GET|POST|data)\.get\s*\(',
+        
+        # FastAPI patterns
+        r'\.(?:find|find_one|aggregate)\s*\([^)]*(?:query|body|form|path)\s*\.\s*\w+',
+        r'async\s+def\s+\w+\s*\([^)]*\)\s*:.*\.(?:find|find_one|aggregate)\s*\(',
+        
+        # =====================================================================
+        # VARIABLE TAINT TRACKING
+        # =====================================================================
+        
+        # Common tainted variable names
+        r'\.(?:find|find_one|aggregate|update_one|delete_one|count_documents)\s*\(\s*'
+        r'(?:\{[^}]*:\s*)?(query_val|user_val|input_val|param_val|search_val|'
+        r'user_input|user_data|query_data|form_data|request_data|payload|'
+        r'filter_dict|query_dict|search_query|user_query|raw_query|'
+        r'unsafe_query|client_query|input_data|user_filter|search_filter|'
+        r'query_param|filter_param|mongo_query|db_query)\s*[,\)]',
+        
+        # Variables ending with common suffixes
+        r'\.(?:find|find_one|aggregate)\s*\(\s*\{[^}]*:\s*[a-z_]+(?:_val|_input|_data|_param|_query)\s*[,\}]',
+        
+        # Generic variable in find (higher FP but catches more)
+        r'(?:db|client|mongo|collection)\.\w+\.(?:find|find_one)\s*\(\s*(?!["\'\{])([a-z_][a-z0-9_]*)\s*[,\)]',
+        
+        # =====================================================================
+        # STRING INJECTION PATTERNS
+        # =====================================================================
+        
+        # f-string in query (CRITICAL)
+        r'\.(?:find|find_one|aggregate|update_one|delete_one)\s*\(\s*f["\']',
+        r'\.(?:find|find_one|aggregate)\s*\(\s*f["\'].*\{.*request',
+        r'\.(?:find|find_one|aggregate)\s*\(\s*f["\'].*\{.*(?:query|param|input|data)',
+        
+        # .format() in query
+        r'\.(?:find|find_one|aggregate)\s*\(\s*["\'][^"\']*\{[^}]*\}[^"\']*["\']\.format\s*\(',
+        r'\.(?:find|find_one|aggregate)\s*\(\s*["\'][^"\']*%[sd][^"\']*["\'].*%\s*\(',
+        
+        # String concatenation
+        r'\.(?:find|find_one|aggregate)\s*\(\s*["\'].*\+.*(?:request|query|param|input)',
+        
+        # =====================================================================
+        # MOTOR (ASYNC MONGODB) PATTERNS
+        # =====================================================================
+        
+        r'await\s+\w+\.(?:find|find_one|aggregate|update_one|delete_one|'
+        r'find_one_and_update|find_one_and_delete|count_documents)\s*\([^)]*request\.',
+        r'await\s+(?:db|client|collection)\.\w+\.(?:find|find_one|aggregate)\s*\([^)]*(?:query|param|input|data)',
+        r'async\s+for\s+\w+\s+in\s+\w+\.find\s*\([^)]*request\.',
+        
+        # =====================================================================
+        # MONGOENGINE / ODM PATTERNS
+        # =====================================================================
+        
+        # MongoEngine queries
+        r'\.objects\s*\(\s*__raw__\s*=\s*[^)]*request\.',
+        r'\.objects\s*\(\s*__raw__\s*=\s*[^)]*(?:query|param|input|data)',
+        r'\.objects\s*\.\s*filter\s*\(\s*\*\*\s*request\.',
+        r'\.objects\s*\(\s*\*\*\s*request\.(args|form|json|data)',
+        
+        # Beanie (async ODM)
+        r'await\s+\w+\.find\s*\(\s*\{[^}]*:\s*.*request\.',
+        r'await\s+\w+\.find_one\s*\(\s*\{[^}]*:\s*.*(?:query|param|input)',
+        
+        # =====================================================================
+        # DANGEROUS OPERATIONS
+        # =====================================================================
+        
+        # eval/exec with MongoDB
+        r'(?:eval|exec)\s*\([^)]*(?:find|mongo|collection|pymongo)',
+        r'(?:eval|exec)\s*\([^)]*(?:request|query|param|input)',
+        
+        # json.loads directly in query (common vulnerability)
+        r'\.(?:find|find_one|aggregate)\s*\(\s*json\.loads\s*\(\s*request\.',
+        r'\.(?:find|find_one|aggregate)\s*\(\s*json\.loads\s*\(',
+        
+        # ast.literal_eval (safer but still risky with untrusted input)
+        r'\.(?:find|find_one|aggregate)\s*\(\s*ast\.literal_eval\s*\(\s*request\.',
+        
+        # Dict unpacking
+        r'\.(?:find|find_one|aggregate)\s*\(\s*\{\s*\*\*\s*(?:request|query|param|input)',
+        r'\.(?:find|find_one|aggregate)\s*\(\s*\*\*\s*request\.(args|form|json|data)',
+        
+        # =====================================================================
+        # OPERATOR INJECTION
+        # =====================================================================
+        
+        # MongoDB operators from variables
+        r'\{\s*["\']?\$(?:where|regex|expr|gt|gte|lt|lte|ne|eq|in|nin|or|and|not|nor)["\']?\s*:\s*'
+        r'(?:request|query|param|input|data|user)',
+        
+        # Dynamic operator key
+        r'\{\s*f?["\']?\$\{?(?:request|query|param|op)',
+        r'\{\s*\*\*\s*\{\s*["\']?\$',
+        
+        # =====================================================================
+        # AGGREGATION PIPELINE INJECTION
+        # =====================================================================
+        
+        r'\.aggregate\s*\(\s*\[?\s*request\.(args|form|json|data)',
+        r'\.aggregate\s*\(\s*\[?\s*(?:query|param|input|pipeline)',
+        r'pipeline\s*=\s*request\.(args|form|json|data)',
+        r'pipeline\s*\.\s*(?:append|extend|insert)\s*\(\s*request\.',
     ],
     severity=Severity.CRITICAL,
     languages=[".py"],
-        false_positive_patterns=[
+    false_positive_patterns=[
         r'ObjectId\s*\(',
-        r'bson\.ObjectId',
-        r'isinstance\s*\(',
-        r'\.get\s*\([^)]+,\s*(?:None|default)',  # Has default value (partial)
-        r'int\s*\(\s*request',  # Casting to int
+        r'bson\.ObjectId\s*\(',
+        r'bson\.objectid\.ObjectId\s*\(',
+        r'ObjectId\.is_valid\s*\(',
+        r'isinstance\s*\([^,]+,\s*(?:ObjectId|str|int|float|bool|dict|list)\)',
+        r'int\s*\(\s*request\.',
+        r'float\s*\(\s*request\.',
+        r'str\s*\(\s*request\.',
+        r'bool\s*\(\s*request\.',
+        r'\.get\s*\([^)]+,\s*(?:None|default|""|\'\')?\s*\)',
         r'validate',
         r'schema',
         r'pydantic',
+        r'marshmallow',
+        r'wtforms',
+        r'cerberus',
+        r'voluptuous',
         r'@validator',
+        r'@field_validator',
+        r'Field\s*\(',
+        r'Query\s*\(',
+        r'Body\s*\(',
+        r'Depends\s*\(',
+        r'sanitize',
+        r'escape',
+        r'clean',
+        r'#.*(?:safe|sanitized|validated)',
+    ],
+),
+
+VulnerabilityPattern(
+    name="NoSQL Injection - MongoDB Tainted Input (PHP)",
+    category=VulnCategory.NOSQL_INJECTION,
+    patterns=[
+        # =====================================================================
+        # PHP MONGODB EXTENSION
+        # =====================================================================
+        
+        # Superglobal injection
+        r'->\s*(?:find|findOne|findOneAndUpdate|findOneAndDelete|findOneAndReplace|'
+        r'updateOne|updateMany|deleteOne|deleteMany|replaceOne|'
+        r'aggregate|count|countDocuments|distinct|'
+        r'insertOne|insertMany|bulkWrite)\s*\(\s*[^)]*\$_(GET|POST|REQUEST|COOKIE|SERVER|SESSION)',
+        
+        # Array with superglobals
+        r'->\s*(?:find|findOne|aggregate)\s*\(\s*\[[^\]]*=>\s*\$_(GET|POST|REQUEST|COOKIE)',
+        
+        # Passing superglobal directly
+        r'->\s*(?:find|findOne|aggregate)\s*\(\s*\$_(GET|POST|REQUEST)',
+        
+        # Variable from superglobal
+        r'->\s*(?:find|findOne|aggregate)\s*\(\s*\$(?:query|filter|search|data|input|params?)',
+        
+        # =====================================================================
+        # LARAVEL MONGODB PATTERNS
+        # =====================================================================
+        
+        # Request facade/helper
+        r'->\s*(?:where|find|get|first|aggregate)\s*\([^)]*(?:\$request->|request\s*\()',
+        r'->\s*(?:where|find)\s*\([^)]*Input::\s*(?:get|all|only)',
+        
+        # Raw queries with user input
+        r'->\s*whereRaw\s*\([^)]*\$_(GET|POST|REQUEST)',
+        r'->\s*raw\s*\([^)]*\$_(GET|POST|REQUEST)',
+        
+        # Collection variable injection
+        r'DB::collection\s*\(\s*\$_(GET|POST|REQUEST)',
+        r'DB::collection\s*\(\s*\$(?:collection|table)',
+        
+        # =====================================================================
+        # DOCTRINE MONGODB ODM
+        # =====================================================================
+        
+        r'createQueryBuilder\s*\([^)]*\)\s*->\s*(?:field|where|equals)\s*\([^)]*\$_(GET|POST|REQUEST)',
+        r'->\s*findBy\s*\(\s*\[[^\]]*=>\s*\$_(GET|POST|REQUEST)',
+        r'->\s*findOneBy\s*\(\s*\[[^\]]*=>\s*\$_(GET|POST|REQUEST)',
+        
+        # =====================================================================
+        # STRING INJECTION
+        # =====================================================================
+        
+        # String concatenation in query
+        r'->\s*(?:find|findOne|aggregate)\s*\(\s*["\'].*\.\s*\$',
+        r'->\s*(?:find|findOne|aggregate)\s*\(\s*"[^"]*\$\{',
+        
+        # json_decode from user input
+        r'->\s*(?:find|findOne|aggregate)\s*\(\s*json_decode\s*\(\s*\$_(GET|POST|REQUEST)',
+        
+        # unserialize (CRITICAL)
+        r'->\s*(?:find|findOne|aggregate)\s*\(\s*unserialize\s*\(',
+        
+        # =====================================================================
+        # OPERATOR INJECTION
+        # =====================================================================
+        
+        r'\[\s*["\']?\$(?:where|regex|gt|gte|lt|lte|ne|eq|in|nin|or|and)["\']?\s*=>\s*\$_(GET|POST|REQUEST)',
+        r'\[\s*\$_(GET|POST|REQUEST).*=>\s*',  # Dynamic key from user input
+    ],
+    severity=Severity.CRITICAL,
+    languages=[".php"],
+    false_positive_patterns=[
+        r'new\s+MongoDB\\BSON\\ObjectId\s*\(',
+        r'ObjectId\s*\(\s*\$',
+        r'filter_var\s*\(',
+        r'filter_input\s*\(',
+        r'htmlspecialchars\s*\(',
+        r'htmlentities\s*\(',
+        r'preg_match\s*\(',
+        r'is_string\s*\(',
+        r'is_int\s*\(',
+        r'is_numeric\s*\(',
+        r'intval\s*\(',
+        r'floatval\s*\(',
+        r'strval\s*\(',
+        r'(?:sanitize|validate|clean|escape)\w*\s*\(',
+        r'->validated\s*\(',
+        r'->validate\s*\(',
+        r'Validator::\s*make\s*\(',
+    ],
+),
+
+VulnerabilityPattern(
+    name="NoSQL Injection - MongoDB Tainted Input (Ruby)",
+    category=VulnCategory.NOSQL_INJECTION,
+    patterns=[
+        # =====================================================================
+        # MONGOID PATTERNS
+        # =====================================================================
+        
+        # Direct params usage
+        r'\.(?:where|find|find_by|find_or_create_by|find_or_initialize_by|'
+        r'update|update_all|delete|delete_all|destroy|destroy_all|'
+        r'first|last|all|count|exists\?|'
+        r'create|create!|new|build)\s*\(\s*params\s*\[',
+        
+        # Params hash unpacking
+        r'\.(?:where|find|find_by)\s*\(\s*params\.(?:permit|require|fetch|slice|to_unsafe_h)',
+        r'\.(?:where|find|find_by)\s*\(\s*params\s*\)',
+        r'\.(?:where|find|find_by)\s*\(\s*\*\*params',
+        
+        # String interpolation in queries
+        r'\.(?:where|find)\s*\(\s*["\'].*#\{.*params',
+        r'\.(?:where|find)\s*\(\s*"[^"]*#\{[^}]*\}[^"]*"',
+        
+        # =====================================================================
+        # MONGO RUBY DRIVER
+        # =====================================================================
+        
+        r'collection\s*\[\s*[^\]]+\s*\]\s*\.(?:find|insert|update|delete|aggregate)\s*\(\s*params',
+        r'\.(?:find|find_one|insert_one|insert_many|update_one|update_many|'
+        r'delete_one|delete_many|replace_one|aggregate|count_documents|distinct)\s*\(\s*params',
+        
+        # =====================================================================
+        # RAILS CONTROLLER PATTERNS
+        # =====================================================================
+        
+        r'@\w+\s*=\s*\w+\.(?:where|find|find_by)\s*\(\s*params',
+        r'\.(?:where|find_by)\s*\(\s*(?:user_params|search_params|query_params|filter_params)',
+        
+        # Strong parameters bypass
+        r'\.(?:where|find)\s*\(\s*params\.to_unsafe_h',
+        r'\.(?:where|find)\s*\(\s*request\.parameters',
+        r'\.(?:where|find)\s*\(\s*request\.query_parameters',
+        r'\.(?:where|find)\s*\(\s*request\.request_parameters',
+        
+        # =====================================================================
+        # OPERATOR INJECTION
+        # =====================================================================
+        
+        r'\{\s*["\']?\$(?:where|regex|gt|gte|lt|lte|ne|eq|in|nin|or|and)["\']?\s*=>\s*params\s*\[',
+        r'\.(?:where|find)\s*\(\s*\{\s*[^}]*=>\s*params\s*\[',
+    ],
+    severity=Severity.CRITICAL,
+    languages=[".rb", ".erb", ".haml", ".slim"],
+    false_positive_patterns=[
+        r'BSON::ObjectId\s*\(',
+        r'\.to_s\s*$',
+        r'\.to_i\s*$',
+        r'\.permit\s*\(',
+        r'\.require\s*\(\s*:\w+\s*\)\s*\.permit\s*\(',
+        r'params\s*\[\s*:id\s*\]',
+        r'params\.fetch\s*\(\s*:\w+\s*,\s*[^)]+\)',
+        r'sanitize',
+        r'escape',
+        r'validates?\s*:',
+        r'strong_parameters',
+    ],
+),
+
+VulnerabilityPattern(
+    name="NoSQL Injection - MongoDB Tainted Input (Java/Kotlin)",
+    category=VulnCategory.NOSQL_INJECTION,
+    patterns=[
+        # =====================================================================
+        # MONGODB JAVA DRIVER
+        # =====================================================================
+        
+        # Direct request parameter usage
+        r'\.(?:find|findOne|updateOne|updateMany|deleteOne|deleteMany|'
+        r'replaceOne|aggregate|countDocuments|distinct|'
+        r'findOneAndUpdate|findOneAndDelete|findOneAndReplace)\s*\(\s*[^)]*request\.getParameter',
+        
+        # Filters with user input
+        r'Filters\.(?:eq|ne|gt|gte|lt|lte|in|nin|and|or|not|nor|regex|'
+        r'text|where|elemMatch|all|size|exists|type|mod)\s*\([^)]*request\.getParameter',
+        
+        # Document/BasicDBObject with user input
+        r'new\s+(?:Document|BasicDBObject)\s*\([^)]*request\.getParameter',
+        r'new\s+(?:Document|BasicDBObject)\s*\(\s*["\'][^"\']+["\']\s*,\s*\w+\s*\)',  # Variable as value
+        r'Document\.parse\s*\(\s*(?:request|param|input|user|body)',
+        r'BasicDBObject\.parse\s*\(\s*(?:request|param|input|user|body)',
+        
+        # Append with user input
+        r'\.append\s*\(\s*["\'][^"\']+["\']\s*,\s*request\.getParameter',
+        r'\.append\s*\(\s*request\.getParameter',  # Dynamic key
+        
+        # =====================================================================
+        # SPRING DATA MONGODB
+        # =====================================================================
+        
+        # Query with Criteria
+        r'Criteria\.where\s*\([^)]*\)\s*\.(?:is|ne|gt|gte|lt|lte|in|nin|regex)\s*\([^)]*request\.getParameter',
+        r'Query\.query\s*\(\s*Criteria\.where\s*\([^)]*request\.getParameter',
+        
+        # MongoTemplate methods
+        r'mongoTemplate\.(?:find|findOne|findAll|findById|count|exists|'
+        r'findAndModify|findAndRemove|findAndReplace|'
+        r'updateFirst|updateMulti|remove|aggregate)\s*\([^)]*request\.getParameter',
+        
+        # @Query annotation with SpEL (CRITICAL)
+        r'@Query\s*\(\s*["\'][^"\']*\?\d+[^"\']*["\']\s*\)',  # Positional parameter
+        r'@Query\s*\(\s*["\'][^"\']*#\{[^}]+\}[^"\']*["\']\s*\)',  # SpEL expression
+        
+        # Repository methods with user input
+        r'repository\.(?:findBy\w+|searchBy\w+|queryBy\w+)\s*\(\s*request\.getParameter',
+        
+        # =====================================================================
+        # AGGREGATION FRAMEWORK
+        # =====================================================================
+        
+        r'Aggregation\.(?:match|project|group|sort|limit|skip|unwind|lookup|'
+        r'graphLookup|bucket|bucketAuto|facet|addFields|replaceRoot|'
+        r'count|out|merge)\s*\([^)]*request\.getParameter',
+        
+        # TypedAggregation
+        r'TypedAggregation\.newAggregation\s*\([^)]*request\.getParameter',
+        
+        # =====================================================================
+        # MORPHIA (MongoDB ODM)
+        # =====================================================================
+        
+        r'datastore\.(?:find|get|createQuery|createAggregation)\s*\([^)]*request\.getParameter',
+        r'\.field\s*\(\s*["\'][^"\']+["\']\s*\)\s*\.(?:equal|notEqual|greaterThan|'
+        r'lessThan|hasThisOne|hasAllOf|hasAnyOf|in|notIn)\s*\([^)]*request\.getParameter',
+        
+        # =====================================================================
+        # STRING BUILDING
+        # =====================================================================
+        
+        r'Document\.parse\s*\(\s*["\'].*\+.*request\.getParameter',
+        r'Document\.parse\s*\(\s*String\.format\s*\(',
+        r'new\s+Document\s*\(\s*["\'].*\+',
+        r'StringBuilder.*append.*request\.getParameter.*Document\.parse',
+    ],
+    severity=Severity.CRITICAL,
+    languages=[".java", ".kt", ".scala", ".groovy"],
+    false_positive_patterns=[
+        r'new\s+ObjectId\s*\(',
+        r'ObjectId\.isValid\s*\(',
+        r'Filters\.eq\s*\(\s*["\']_id["\']\s*,\s*new\s+ObjectId',
+        r'@PathVariable\s+ObjectId',
+        r'@RequestParam.*ObjectId',
+        r'Integer\.parseInt\s*\(',
+        r'Long\.parseLong\s*\(',
+        r'Double\.parseDouble\s*\(',
+        r'@Valid\s+',
+        r'@Validated\s+',
+        r'@Pattern\s*\(',
+        r'@Size\s*\(',
+        r'@NotNull',
+        r'@NotEmpty',
+        r'@NotBlank',
+        r'BindingResult',
+        r'Validator\.',
+        r'sanitize',
+        r'escape',
+    ],
+),
+
+VulnerabilityPattern(
+    name="NoSQL Injection - MongoDB Tainted Input (C#/.NET)",
+    category=VulnCategory.NOSQL_INJECTION,
+    patterns=[
+        # =====================================================================
+        # MONGODB .NET DRIVER
+        # =====================================================================
+        
+        # Direct request usage
+        r'\.(?:Find|FindAsync|FindOne|FindOneAsync|'
+        r'UpdateOne|UpdateOneAsync|UpdateMany|UpdateManyAsync|'
+        r'DeleteOne|DeleteOneAsync|DeleteMany|DeleteManyAsync|'
+        r'ReplaceOne|ReplaceOneAsync|'
+        r'Aggregate|AggregateAsync|'
+        r'CountDocuments|CountDocumentsAsync|'
+        r'FindOneAndUpdate|FindOneAndUpdateAsync|'
+        r'FindOneAndDelete|FindOneAndDeleteAsync|'
+        r'FindOneAndReplace|FindOneAndReplaceAsync)\s*\([^)]*Request\.(Query|Form|Body|Cookies|Headers)',
+        
+        # FilterDefinition with user input
+        r'Builders<\w+>\.Filter\.(?:Eq|Ne|Gt|Gte|Lt|Lte|In|Nin|And|Or|Not|Nor|'
+        r'Regex|Text|Where|ElemMatch|All|Size|Exists|Type|Mod)\s*\([^)]*Request\.',
+        
+        # BsonDocument with user input
+        r'new\s+BsonDocument\s*\([^)]*Request\.(Query|Form|Body)',
+        r'BsonDocument\.Parse\s*\(\s*(?:Request\.|request\.|input|user|param|query|body)',
+        
+        # =====================================================================
+        # ASP.NET CORE PATTERNS
+        # =====================================================================
+        
+        # Controller parameters
+        r'\[FromQuery\][^]]*\s+\w+.*\.(?:Find|FindAsync)',
+        r'\[FromBody\][^]]*\s+\w+.*\.(?:Find|FindAsync)',
+        r'\[FromForm\][^]]*\s+\w+.*\.(?:Find|FindAsync)',
+        
+        # HttpContext
+        r'HttpContext\.Request\.(Query|Form|Body).*\.(?:Find|FindAsync)',
+        
+        # =====================================================================
+        # LINQ PROVIDER
+        # =====================================================================
+        
+        # IQueryable with user input
+        r'\.AsQueryable\s*\(\s*\)\s*\.Where\s*\([^)]*Request\.',
+        r'\.Where\s*\(\s*\w+\s*=>\s*\w+\.\w+\s*==\s*Request\.',
+        
+        # =====================================================================
+        # STRING BUILDING
+        # =====================================================================
+        
+        r'BsonDocument\.Parse\s*\(\s*\$"',
+        r'BsonDocument\.Parse\s*\(\s*["\'].*\+',
+        r'BsonDocument\.Parse\s*\(\s*String\.Format\s*\(',
+        r'BsonDocument\.Parse\s*\(\s*string\.Concat\s*\(',
+        
+        # =====================================================================
+        # OPERATOR INJECTION
+        # =====================================================================
+        
+        r'\{\s*["\']?\$(?:where|regex|gt|gte|lt|lte|ne|eq|in|nin|or|and)["\']?\s*:\s*Request\.',
+        r'FilterDefinition.*\$.*Request\.',
+    ],
+    severity=Severity.CRITICAL,
+    languages=[".cs", ".vb"],
+    false_positive_patterns=[
+        r'ObjectId\.Parse\s*\(',
+        r'ObjectId\.TryParse\s*\(',
+        r'new\s+ObjectId\s*\(',
+        r'int\.Parse\s*\(',
+        r'int\.TryParse\s*\(',
+        r'long\.Parse\s*\(',
+        r'long\.TryParse\s*\(',
+        r'Guid\.Parse\s*\(',
+        r'Guid\.TryParse\s*\(',
+        r'\[Required\]',
+        r'\[StringLength\s*\(',
+        r'\[RegularExpression\s*\(',
+        r'\[Range\s*\(',
+        r'ModelState\.IsValid',
+        r'TryValidateModel\s*\(',
+        r'Validator\.TryValidateObject\s*\(',
+        r'DataAnnotations',
+        r'FluentValidation',
+        r'\.Sanitize\s*\(',
+        r'\.Escape\s*\(',
+    ],
+),
+
+VulnerabilityPattern(
+    name="NoSQL Injection - MongoDB Tainted Input (Go)",
+    category=VulnCategory.NOSQL_INJECTION,
+    patterns=[
+        # =====================================================================
+        # OFFICIAL MONGODB GO DRIVER
+        # =====================================================================
+        
+        # Basic operations with user input
+        r'\.(?:Find|FindOne|InsertOne|InsertMany|'
+        r'UpdateOne|UpdateMany|UpdateByID|'
+        r'DeleteOne|DeleteMany|'
+        r'ReplaceOne|FindOneAndUpdate|FindOneAndDelete|FindOneAndReplace|'
+        r'Aggregate|CountDocuments|EstimatedDocumentCount|Distinct)\s*\(\s*[^)]*r\.(URL\.Query|Form|PostForm|Body)',
+        
+        # bson.M/bson.D with user input
+        r'bson\.[MD]\s*\{[^}]*:\s*r\.(URL\.Query|Form|PostForm|FormValue)',
+        r'bson\.[MD]\s*\{[^}]*:\s*(?:query|param|input|user|data)',
+        
+        # Gin framework
+        r'c\.(?:Query|PostForm|Param|GetQuery|DefaultQuery)\s*\([^)]*\).*bson\.[MD]',
+        r'bson\.[MD]\s*\{[^}]*:\s*c\.(?:Query|PostForm|Param)',
+        
+        # Echo framework
+        r'c\.(?:QueryParam|FormValue|Param)\s*\([^)]*\).*bson\.[MD]',
+        r'bson\.[MD]\s*\{[^}]*:\s*c\.(?:QueryParam|FormValue|Param)',
+        
+        # Fiber framework
+        r'c\.(?:Query|FormValue|Params)\s*\([^)]*\).*bson\.[MD]',
+        r'bson\.[MD]\s*\{[^}]*:\s*c\.(?:Query|FormValue|Params)',
+        
+        # =====================================================================
+        # STRING BUILDING
+        # =====================================================================
+        
+        r'bson\.UnmarshalExtJSON\s*\(\s*\[\]byte\s*\(\s*.*\+',
+        r'bson\.UnmarshalExtJSON\s*\(\s*\[\]byte\s*\(\s*fmt\.Sprintf',
+        r'bson\.UnmarshalExtJSON\s*\(\s*\[\]byte\s*\(\s*r\.(URL\.Query|Form|Body)',
+        
+        # =====================================================================
+        # OPERATOR INJECTION
+        # =====================================================================
+        
+        r'bson\.[MD]\s*\{\s*"\$(?:where|regex|gt|gte|lt|lte|ne|eq|in|nin|or|and)"\s*:\s*(?:query|param|input|r\.)',
+        r'\$\w+.*r\.(?:URL\.Query|Form|PostForm|FormValue)',
+    ],
+    severity=Severity.CRITICAL,
+    languages=[".go"],
+    false_positive_patterns=[
+        r'primitive\.ObjectIDFromHex\s*\(',
+        r'primitive\.IsValidObjectID\s*\(',
+        r'strconv\.Atoi\s*\(',
+        r'strconv\.ParseInt\s*\(',
+        r'strconv\.ParseFloat\s*\(',
+        r'strconv\.ParseBool\s*\(',
+        r'uuid\.Parse\s*\(',
+        r'validator\.\w+',
+        r'validate\.\w+',
+        r'binding:"required',
+        r'binding:"',
+    ],
+),
+
+# =============================================================================
+# REDIS INJECTION PATTERNS
+# =============================================================================
+
+VulnerabilityPattern(
+    name="NoSQL Injection - Redis Command Injection",
+    category=VulnCategory.NOSQL_INJECTION,
+    patterns=[
+        # =====================================================================
+        # JAVASCRIPT/NODE.JS - ioredis/redis
+        # =====================================================================
+        
+        # Direct command execution with user input
+        r'redis\.(?:eval|evalsha|script|send_command|sendCommand|call)\s*\(\s*[^)]*req\.(body|query|params)',
+        r'client\.(?:eval|evalsha|script|send_command|sendCommand|call)\s*\(\s*[^)]*req\.(body|query|params)',
+        
+        # Key operations with user input (key injection)
+        r'redis\.(?:get|set|del|exists|expire|ttl|keys|scan|'
+        r'hget|hset|hdel|hgetall|hmget|hmset|'
+        r'lpush|rpush|lpop|rpop|lrange|lindex|'
+        r'sadd|srem|smembers|sismember|'
+        r'zadd|zrem|zrange|zrangebyscore|zscore|'
+        r'publish|subscribe)\s*\(\s*req\.(body|query|params)',
+        
+        # Template literal in key/value
+        r'redis\.\w+\s*\(\s*`[^`]*\$\{[^}]*req\.',
+        
+        # String concatenation
+        r'redis\.\w+\s*\(\s*["\'].*\+.*req\.',
+        
+        # =====================================================================
+        # PYTHON - redis-py
+        # =====================================================================
+        
+        r'redis\.(?:eval|evalsha|script_load|execute_command)\s*\(\s*[^)]*request\.',
+        r'r\.(?:get|set|delete|exists|expire|keys|scan|'
+        r'hget|hset|hdel|hgetall|hmget|hmset|'
+        r'lpush|rpush|lpop|rpop|lrange|'
+        r'sadd|srem|smembers|'
+        r'zadd|zrem|zrange|zscore|'
+        r'publish)\s*\(\s*request\.(args|form|json|data)',
+        
+        # f-string in Redis command
+        r'r\.\w+\s*\(\s*f["\'].*request\.',
+        r'redis\.\w+\s*\(\s*f["\']',
+        
+        # =====================================================================
+        # PHP - Predis/phpredis
+        # =====================================================================
+        
+        r'\$redis->(?:eval|evalsha|script|rawCommand)\s*\(\s*\$_(GET|POST|REQUEST)',
+        r'\$redis->\w+\s*\(\s*\$_(GET|POST|REQUEST)',
+        
+        # =====================================================================
+        # DANGEROUS COMMANDS
+        # =====================================================================
+        
+        # EVAL command (Lua execution)
+        r'\.eval\s*\(\s*[^)]*(?:req\.|request\.|params|query|input|user)',
+        
+        # KEYS command with pattern from user (DoS risk)
+        r'\.keys\s*\(\s*(?:req\.|request\.|params|query|input|user)',
+        r'\.keys\s*\(\s*[`"\'].*\*.*(?:\+|\$\{)',
+        
+        # CONFIG command
+        r'\.config\s*\(\s*[^)]*(?:req\.|request\.|params|query|input|user)',
+        
+        # DEBUG command
+        r'\.debug\s*\(\s*[^)]*(?:req\.|request\.|params|query|input|user)',
+        
+        # FLUSHALL/FLUSHDB
+        r'\.(?:flushall|flushdb)\s*\(',  # Just flag usage
+    ],
+    severity=Severity.HIGH,
+    languages=[".js", ".ts", ".py", ".php", ".rb", ".java", ".go", ".cs"],
+    false_positive_patterns=[
+        r'redis\.get\s*\(\s*["\'][a-zA-Z_:]+["\']\s*\)',  # Static key
+        r'\.get\s*\(\s*`[a-zA-Z_:]+`\s*\)',  # Static key
+        r'parseInt\s*\(',
+        r'int\s*\(',
+        r'sanitize',
+        r'escape',
+        r'validate',
+    ],
+),
+
+# =============================================================================
+# ELASTICSEARCH INJECTION PATTERNS
+# =============================================================================
+
+VulnerabilityPattern(
+    name="NoSQL Injection - Elasticsearch Query Injection",
+    category=VulnCategory.NOSQL_INJECTION,
+    patterns=[
+        # =====================================================================
+        # JAVASCRIPT - elasticsearch.js / @elastic/elasticsearch
+        # =====================================================================
+        
+        r'client\.(?:search|index|update|delete|bulk|scroll|'
+        r'msearch|mget|reindex|updateByQuery|deleteByQuery)\s*\(\s*\{[^}]*body\s*:\s*[^}]*req\.(body|query|params)',
+        
+        # Query DSL with user input
+        r'body\s*:\s*\{[^}]*query\s*:\s*[^}]*req\.(body|query|params)',
+        r'query\s*:\s*\{[^}]*(?:match|term|terms|range|bool|must|should|filter)\s*:\s*[^}]*req\.',
+        
+        # Script execution with user input (CRITICAL)
+        r'script\s*:\s*\{[^}]*source\s*:\s*[^}]*req\.(body|query|params)',
+        r'script\s*:\s*["\'].*req\.(body|query|params)',
+        
+        # Template literal
+        r'client\.search\s*\(\s*\{[^}]*`[^`]*\$\{[^}]*req\.',
+        
+        # =====================================================================
+        # PYTHON - elasticsearch-py
+        # =====================================================================
+        
+        r'es\.(?:search|index|update|delete|bulk|scroll|'
+        r'msearch|mget|reindex|update_by_query|delete_by_query)\s*\([^)]*body\s*=\s*[^)]*request\.',
+        
+        # f-string in query
+        r'es\.\w+\s*\(\s*[^)]*f["\'].*request\.',
+        r'body\s*=\s*f["\'].*request\.',
+        
+        # json.loads from request
+        r'es\.\w+\s*\(\s*[^)]*json\.loads\s*\(\s*request\.',
+        
+        # =====================================================================
+        # JAVA - Elasticsearch High Level REST Client
+        # =====================================================================
+        
+        r'SearchRequest.*QueryBuilders\.(?:matchQuery|termQuery|termsQuery|rangeQuery|'
+        r'boolQuery|wildcardQuery|regexpQuery|prefixQuery|fuzzyQuery)\s*\([^)]*request\.getParameter',
+        
+        r'new\s+SearchSourceBuilder\s*\(\s*\)\s*\.query\s*\([^)]*request\.getParameter',
+        
+        # Script with user input
+        r'new\s+Script\s*\([^)]*request\.getParameter',
+        r'Script\.(?:inline|stored)\s*\([^)]*request\.getParameter',
+        
+        # =====================================================================
+        # DANGEROUS PATTERNS
+        # =====================================================================
+        
+        # Script execution
+        r'script\s*[=:]\s*[^,}]*(?:req\.|request\.|params|query|input|user)',
+        
+        # _source filtering with user input
+        r'_source\s*[=:]\s*[^,}]*(?:req\.|request\.|params|query|input|user)',
+        
+        # Index name from user input (index injection)
+        r'index\s*[=:]\s*(?:req\.|request\.|params|query|input|user)',
+    ],
+    severity=Severity.HIGH,
+    languages=[".js", ".ts", ".py", ".java", ".php", ".rb", ".go", ".cs"],
+    false_positive_patterns=[
+        r'index\s*:\s*["\'][a-zA-Z_-]+["\']',  # Static index
+        r'sanitize',
+        r'escape',
+        r'validate',
+        r'parseInt',
+        r'int\s*\(',
+    ],
+),
+
+# =============================================================================
+# COUCHDB INJECTION PATTERNS
+# =============================================================================
+
+VulnerabilityPattern(
+    name="NoSQL Injection - CouchDB Query Injection",
+    category=VulnCategory.NOSQL_INJECTION,
+    patterns=[
+        # Mango queries with user input
+        r'\.find\s*\(\s*\{[^}]*selector\s*:\s*[^}]*(?:req\.|request\.|params|query|input)',
+        
+        # View queries with user input
+        r'\.view\s*\(\s*[^,]+,\s*[^,]+,\s*\{[^}]*(?:key|startkey|endkey)\s*:\s*(?:req\.|request\.|params)',
+        
+        # Design document with user input
+        r'\.insert\s*\(\s*\{[^}]*views\s*:\s*[^}]*(?:req\.|request\.|params)',
+        
+        # String injection
+        r'nano\.\w+\s*\(\s*[`"\'].*(?:\+|\$\{).*(?:req\.|request\.|params)',
+    ],
+    severity=Severity.HIGH,
+    languages=[".js", ".ts", ".py", ".php", ".rb", ".java", ".go"],
+    false_positive_patterns=[
+        r'sanitize',
+        r'escape',
+        r'validate',
+    ],
+),
+
+# =============================================================================
+# DYNAMODB INJECTION PATTERNS  
+# =============================================================================
+
+VulnerabilityPattern(
+    name="NoSQL Injection - DynamoDB Query Injection",
+    category=VulnCategory.NOSQL_INJECTION,
+    patterns=[
+        # =====================================================================
+        # AWS SDK - JavaScript
+        # =====================================================================
+        
+        r'dynamodb\.(?:query|scan|getItem|putItem|updateItem|deleteItem|batchGetItem|'
+        r'batchWriteItem|transactGetItems|transactWriteItems)\s*\(\s*\{[^}]*(?:Key|KeyConditionExpression|'
+        r'FilterExpression|ProjectionExpression|ExpressionAttributeValues|ExpressionAttributeNames)\s*:'
+        r'[^}]*req\.(body|query|params)',
+        
+        # Template literal in expressions
+        r'(?:KeyConditionExpression|FilterExpression)\s*:\s*`[^`]*\$\{[^}]*req\.',
+        
+        # String concatenation in expressions
+        r'(?:KeyConditionExpression|FilterExpression)\s*:\s*["\'].*\+.*req\.',
+        
+        # =====================================================================
+        # AWS SDK - Python (boto3)
+        # =====================================================================
+        
+        r'table\.(?:query|scan|get_item|put_item|update_item|delete_item|'
+        r'batch_get_item|batch_write_item)\s*\([^)]*(?:Key|KeyConditionExpression|'
+        r'FilterExpression|ProjectionExpression|ExpressionAttributeValues)\s*=\s*[^)]*request\.',
+        
+        # f-string in expressions
+        r'(?:KeyConditionExpression|FilterExpression)\s*=\s*f["\'].*request\.',
+        
+        # =====================================================================
+        # DANGEROUS PATTERNS
+        # =====================================================================
+        
+        # Raw expression from user
+        r'KeyConditionExpression\s*[=:]\s*(?:req\.|request\.|params|query|input|user)',
+        r'FilterExpression\s*[=:]\s*(?:req\.|request\.|params|query|input|user)',
+        
+        # ExpressionAttributeValues from user (partial control)
+        r'ExpressionAttributeValues\s*[=:]\s*(?:req\.|request\.|params|query|input|user)',
+    ],
+    severity=Severity.HIGH,
+    languages=[".js", ".ts", ".py", ".java", ".go", ".cs"],
+    false_positive_patterns=[
+        r'ExpressionAttributeValues\s*:\s*\{[^}]*:\s*\{[^}]*[SN]\s*:\s*(?:String|parseInt)',
+        r'sanitize',
+        r'escape',
+        r'validate',
+    ],
+),
+
+# =============================================================================
+# FIREBASE/FIRESTORE INJECTION PATTERNS
+# =============================================================================
+
+VulnerabilityPattern(
+    name="NoSQL Injection - Firebase/Firestore Query Injection",
+    category=VulnCategory.NOSQL_INJECTION,
+    patterns=[
+        # =====================================================================
+        # FIRESTORE - JavaScript
+        # =====================================================================
+        
+        # Collection/document path from user input
+        r'(?:firestore|db)\s*\.\s*collection\s*\(\s*req\.(body|query|params)',
+        r'\.doc\s*\(\s*req\.(body|query|params)',
+        
+        # Query operators with user input
+        r'\.where\s*\(\s*[^,]+,\s*[^,]+,\s*req\.(body|query|params)',
+        r'\.where\s*\(\s*req\.(body|query|params)',  # Field from user
+        
+        # Order/limit with user input
+        r'\.orderBy\s*\(\s*req\.(body|query|params)',
+        r'\.limit\s*\(\s*req\.(body|query|params)',
+        
+        # =====================================================================
+        # REALTIME DATABASE - JavaScript
+        # =====================================================================
+        
+        # Path injection
+        r'(?:database|db)\s*\(\s*\)\s*\.ref\s*\(\s*req\.(body|query|params)',
+        r'\.ref\s*\(\s*`[^`]*\$\{[^}]*req\.',
+        r'\.ref\s*\(\s*["\'].*\+.*req\.',
+        
+        # Query methods with user input
+        r'\.(?:orderByChild|orderByKey|orderByValue|startAt|endAt|equalTo|'
+        r'limitToFirst|limitToLast)\s*\(\s*req\.(body|query|params)',
+        
+        # =====================================================================
+        # PYTHON - firebase-admin
+        # =====================================================================
+        
+        r'db\.collection\s*\(\s*request\.(args|form|json|data)',
+        r'\.document\s*\(\s*request\.(args|form|json|data)',
+        r'\.where\s*\([^)]*request\.(args|form|json|data)',
+        
+        # Realtime Database
+        r'db\.reference\s*\(\s*request\.(args|form|json|data)',
+        r'db\.reference\s*\(\s*f["\'].*request\.',
+    ],
+    severity=Severity.HIGH,
+    languages=[".js", ".ts", ".py", ".java", ".swift", ".kt"],
+    false_positive_patterns=[
+        r'\.doc\s*\(\s*["\'][a-zA-Z0-9_-]+["\']\s*\)',  # Static doc ID
+        r'\.collection\s*\(\s*["\'][a-zA-Z0-9_-]+["\']\s*\)',  # Static collection
+        r'sanitize',
+        r'escape',
+        r'validate',
+    ],
+),
+
+# =============================================================================
+# CASSANDRA CQL INJECTION PATTERNS
+# =============================================================================
+
+VulnerabilityPattern(
+    name="NoSQL Injection - Cassandra CQL Injection",
+    category=VulnCategory.NOSQL_INJECTION,
+    patterns=[
+        # =====================================================================
+        # STRING CONCATENATION IN CQL
+        # =====================================================================
+        
+        r'session\.execute\s*\(\s*["\']SELECT\s+.*\+',
+        r'session\.execute\s*\(\s*f["\']SELECT\s+',
+        r'session\.execute\s*\(\s*["\']SELECT\s+.*%\s*\(',
+        r'session\.execute\s*\(\s*["\']INSERT\s+.*\+',
+        r'session\.execute\s*\(\s*["\']UPDATE\s+.*\+',
+        r'session\.execute\s*\(\s*["\']DELETE\s+.*\+',
+        
+        # Template literals (JavaScript)
+        r'client\.execute\s*\(\s*`SELECT\s+.*\$\{',
+        
+        # =====================================================================
+        # USER INPUT IN QUERIES
+        # =====================================================================
+        
+        r'session\.execute\s*\(\s*[^)]*(?:req\.|request\.|params|query|input)',
+        r'client\.execute\s*\(\s*[^)]*(?:req\.|request\.|params|query|input)',
+        
+        # Batch statements
+        r'BatchStatement.*add\s*\([^)]*(?:req\.|request\.|params|query|input)',
+    ],
+    severity=Severity.CRITICAL,
+    languages=[".py", ".java", ".js", ".ts", ".go", ".cs"],
+    false_positive_patterns=[
+        r'session\.execute\s*\([^,]+,\s*\[',  # Parameterized query
+        r'session\.execute\s*\([^,]+,\s*\(',  # Parameterized query
+        r'\.prepare\s*\(',                     # Prepared statement
+        r'PreparedStatement',
+        r'sanitize',
+        r'escape',
+        r'validate',
+    ],
+),
+
+# =============================================================================
+# NEO4J CYPHER INJECTION PATTERNS
+# =============================================================================
+
+VulnerabilityPattern(
+    name="NoSQL Injection - Neo4j Cypher Injection",
+    category=VulnCategory.NOSQL_INJECTION,
+    patterns=[
+        # =====================================================================
+        # STRING CONCATENATION IN CYPHER
+        # =====================================================================
+        
+        r'session\.run\s*\(\s*["\']MATCH\s+.*\+',
+        r'session\.run\s*\(\s*f["\']MATCH\s+',
+        r'session\.run\s*\(\s*["\']CREATE\s+.*\+',
+        r'session\.run\s*\(\s*["\']MERGE\s+.*\+',
+        r'session\.run\s*\(\s*["\']DELETE\s+.*\+',
+        r'session\.run\s*\(\s*["\']SET\s+.*\+',
+        r'session\.run\s*\(\s*["\']RETURN\s+.*\+',
+        
+        # Template literals (JavaScript)
+        r'session\.run\s*\(\s*`MATCH\s+.*\$\{',
+        r'session\.run\s*\(\s*`CREATE\s+.*\$\{',
+        
+        # =====================================================================
+        # USER INPUT IN CYPHER
+        # =====================================================================
+        
+        r'session\.run\s*\(\s*[^)]*(?:req\.|request\.|params|query|input)',
+        r'tx\.run\s*\(\s*[^)]*(?:req\.|request\.|params|query|input)',
+        
+        # Cypher keywords with user input
+        r'(?:MATCH|CREATE|MERGE|DELETE|SET|WHERE|RETURN)\s*[^)]*(?:req\.|request\.|params|query|input)',
+    ],
+    severity=Severity.CRITICAL,
+    languages=[".py", ".java", ".js", ".ts", ".go", ".cs"],
+    false_positive_patterns=[
+        r'session\.run\s*\([^,]+,\s*\{',      # Parameterized query
+        r'tx\.run\s*\([^,]+,\s*\{',           # Parameterized query
+        r'\$\w+',                              # Cypher parameter placeholder
+        r'sanitize',
+        r'escape',
+        r'validate',
+    ],
+),
+
+# =============================================================================
+# GENERIC $WHERE OPERATOR DETECTION (ALL LANGUAGES)
+# =============================================================================
+
+VulnerabilityPattern(
+    name="NoSQL Injection - MongoDB $where Operator (Dangerous)",
+    category=VulnCategory.NOSQL_INJECTION,
+    patterns=[
+        # Basic $where detection (code smell - allows JS execution)
+        r'\$where\s*:',
+        r'"\$where"\s*:',
+        r"'\$where'\s*:",
+        r'\[\s*["\']?\$where["\']?\s*\]',
+        
+        # $where with user input (CRITICAL)
+        r'\$where\s*:\s*[^,}]*(?:req\.|request\.|params|query|user_input|input|data|payload)',
+        
+        # $where with string operations (injection vector)
+        r'\$where\s*:\s*["\'][^"\']*\s*\+',
+        r'\$where\s*:\s*`[^`]*\$\{',
+        r'\$where\s*:\s*f["\']',
+        r'\$where\s*:\s*["\'].*\.format\s*\(',
+        r'\$where\s*:\s*["\'].*%\s*[sd]',
+        
+        # $where with function containing external variables
+        r'\$where\s*:\s*function\s*\([^)]*\)\s*\{[^}]*(?:req\.|request\.|params|this\.\w+\s*[=!]==?\s*[^"\']+)',
+        r'\$where\s*:\s*function\s*\([^)]*\)\s*\{[^}]*(?:eval|exec|Function)\s*\(',
+        
+        # $where with arrow function
+        r'\$where\s*:\s*\(\s*\)\s*=>\s*[^,}]*(?:req\.|request\.|params)',
+    ],
+    severity=Severity.HIGH,
+    languages=[".js", ".ts", ".jsx", ".tsx", ".py", ".php", ".java", ".rb", ".cs", ".go", ".kt"],
+    false_positive_patterns=[
+        r'\$where\s*:\s*function\s*\(\)\s*\{\s*return\s+(?:true|false)\s*;?\s*\}',  # Static boolean
+        r'\$where\s*:\s*["\']this\.\w+\s*[<>=!]+\s*\d+["\']',  # Hardcoded comparison
+        r'\$where\s*:\s*["\']this\.\w+\s*[<>=!]+\s*["\'][^"\']+["\']["\']',  # Hardcoded string comparison
+        r'#.*\$where',   # Commented
+        r'//.*\$where',  # Commented
+        r'/\*.*\$where', # Commented
+        r'\*.*\$where',  # Commented
+    ],
+),
+
+# =============================================================================
+# AGGREGATION PIPELINE INJECTION (ALL LANGUAGES)
+# =============================================================================
+
+VulnerabilityPattern(
+    name="NoSQL Injection - MongoDB Aggregation Pipeline Injection",
+    category=VulnCategory.NOSQL_INJECTION,
+    patterns=[
+        # Pipeline from user input
+        r'\.aggregate\s*\(\s*req\.(body|query|params)',
+        r'\.aggregate\s*\(\s*request\.(args|form|json|data|GET|POST)',
+        r'\.aggregate\s*\(\s*\$_(GET|POST|REQUEST)',
+        r'\.aggregate\s*\(\s*params',
+        
+        # Pipeline array with user input
+        r'\.aggregate\s*\(\s*\[\s*\{?\s*\$\w+\s*:\s*[^}]*(?:req\.|request\.|params|query|input|user)',
+        
+        # Dangerous stages with user input
+        r'\$(?:lookup|graphLookup|unionWith|merge|out)\s*:\s*\{[^}]*(?:from|into|as)\s*:\s*(?:req\.|request\.|params|query|input)',
+        
+        # $function stage (JavaScript execution)
+        r'\$function\s*:\s*\{[^}]*body\s*:\s*[^}]*(?:req\.|request\.|params|query|input)',
+        
+        # $accumulator stage (JavaScript execution)
+        r'\$accumulator\s*:\s*\{[^}]*(?:init|accumulate|merge|finalize)\s*:\s*[^}]*(?:req\.|request\.|params|query|input)',
+        
+        # Variable in pipeline
+        r'pipeline\s*=\s*(?:req\.|request\.|params|query|input|\$_(GET|POST|REQUEST))',
+        r'pipeline\s*\.\s*(?:push|append|extend|concat)\s*\([^)]*(?:req\.|request\.|params|query|input)',
+    ],
+    severity=Severity.CRITICAL,
+    languages=[".js", ".ts", ".py", ".php", ".java", ".rb", ".cs", ".go", ".kt"],
+    false_positive_patterns=[
+        r'\.aggregate\s*\(\s*\[\s*\{\s*\$match\s*:\s*\{\s*["\'][a-zA-Z_]+["\']\s*:\s*(?:ObjectId|new\s+ObjectId)',
+        r'sanitize',
+        r'escape',
+        r'validate',
     ],
 ),
 
