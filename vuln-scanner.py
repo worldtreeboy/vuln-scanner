@@ -1502,6 +1502,195 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
             r'escape',
         ],
     ),
+    VulnerabilityPattern(
+    name="Prototype Pollution - Unsafe Object Manipulation",
+    category=VulnCategory.PROTOTYPE_POLLUTION,
+    patterns=[
+        # =====================================================================
+        # VULNERABLE LIBRARY FUNCTIONS
+        # =====================================================================
+        # Lodash/Underscore dangerous methods
+        r'_\.merge\s*\(',
+        r'_\.mergeWith\s*\(',
+        r'_\.defaultsDeep\s*\(',
+        r'_\.setWith\s*\(',
+        r'_\.set\s*\(',
+        r'_\.assignIn\s*\(',
+        r'_\.assignInWith\s*\(',
+        r'_\.extendWith\s*\(',
+        r'lodash\.merge\s*\(',
+        r'lodash\.defaultsDeep\s*\(',
+        r'lodash\.set\s*\(',
+        # jQuery deep extend
+        r'\$\.extend\s*\(\s*true\s*,',
+        r'jQuery\.extend\s*\(\s*true\s*,',
+        # Other vulnerable libraries
+        r'hoek\.merge\s*\(',
+        r'hoek\.applyToDefaults\s*\(',
+        r'deepmerge\s*\(',
+        r'deep-extend\s*\(',
+        r'merge-deep\s*\(',
+        r'mixin-deep\s*\(',
+        r'defaults-deep\s*\(',
+        r'clone-deep\s*\(',
+        r'deap\.merge\s*\(',
+        r'deap\.extend\s*\(',
+        
+        # =====================================================================
+        # OBJECT SPREAD WITH USER INPUT
+        # =====================================================================
+        # Spreading request body/params directly
+        r'\{\s*\.\.\.req\.body',
+        r'\{\s*\.\.\.req\.query',
+        r'\{\s*\.\.\.req\.params',
+        r'\{\s*\.\.\.request\.body',
+        r'\{\s*\.\.\.ctx\.request\.body',
+        r'\{\s*\.\.\.body\s*\}',
+        r'\{\s*\.\.\.params\s*\}',
+        r'\{\s*\.\.\.data\s*,',
+        r'\{\s*\.\.\.input\s*,',
+        r'\{\s*\.\.\.payload\s*,',
+        r'Object\.assign\s*\(\s*\{\s*\}\s*,\s*req\.',
+        r'Object\.assign\s*\(\s*\{\s*\}\s*,\s*request\.',
+        r'Object\.assign\s*\(\s*target\s*,\s*req\.',
+        r'Object\.assign\s*\(\s*\w+\s*,\s*JSON\.parse',
+        
+        # =====================================================================
+        # JSON PARSING WITHOUT VALIDATION
+        # =====================================================================
+        # Direct JSON parse to object assignment
+        r'JSON\.parse\s*\([^)]+\)\s*;?\s*(?:const|let|var)?\s*\w+\s*=',
+        r'\[\s*\w+\s*\]\s*=\s*JSON\.parse\s*\(',
+        r'Object\.assign\s*\([^,]+,\s*JSON\.parse\s*\(',
+        r'\.\.\.JSON\.parse\s*\(',
+        
+        # =====================================================================
+        # RECURSIVE/DEEP COPY FUNCTIONS
+        # =====================================================================
+        # Custom deep clone/copy patterns
+        r'function\s+(?:deepClone|deepCopy|cloneDeep|clone)\s*\(',
+        r'(?:const|let|var)\s+(?:deepClone|deepCopy|cloneDeep)\s*=\s*\(',
+        r'typeof\s+\w+\s*===?\s*["\']object["\']\s*\?\s*(?:deepClone|deepCopy|merge)',
+        # Recursive calls with object assignment
+        r'typeof\s+source\[\w+\]\s*===?\s*["\']object["\']\s*\?\s*\w+\s*\(',
+        r'typeof\s+obj\[\w+\]\s*===?\s*["\']object["\']\s*\?\s*\w+\s*\(',
+        
+        # =====================================================================
+        # PROPERTY DESCRIPTOR MANIPULATION
+        # =====================================================================
+        r'Object\.defineProperty\s*\(\s*\w+\s*,\s*\w+\s*,',
+        r'Object\.defineProperties\s*\(\s*\w+\s*,\s*\w+\s*\)',
+        r'Object\.setPrototypeOf\s*\(',
+        r'Reflect\.set\s*\(\s*\w+\s*,\s*\w+\s*,',
+        r'Reflect\.defineProperty\s*\(',
+        
+        # =====================================================================
+        # UNSAFE DESERIALIZATION TO OBJECT
+        # =====================================================================
+        # Query string parsing
+        r'querystring\.parse\s*\(',
+        r'qs\.parse\s*\(',
+        r'new\s+URLSearchParams\s*\([^)]*\)\s*(?:\.entries\s*\(\s*\)|\.forEach)',
+        # Form data to object
+        r'formData\.entries\s*\(',
+        r'Object\.fromEntries\s*\(\s*(?:formData|urlParams|searchParams)',
+        
+        # =====================================================================
+        # EVAL/FUNCTION CONSTRUCTOR WITH OBJECT ACCESS
+        # =====================================================================
+        r'eval\s*\(\s*["\']?\s*\w+\s*\[\s*\w+\s*\]',
+        r'new\s+Function\s*\([^)]*\[\s*\w+\s*\]',
+        r'\[\s*["\']constructor["\']\s*\]\s*\(\s*["\']',
+        
+        # =====================================================================
+        # PROTOTYPE CHAIN ACCESS
+        # =====================================================================
+        # Direct prototype access
+        r'\.prototype\s*\[\s*\w+\s*\]\s*=',
+        r'\[\s*["\']prototype["\']\s*\]\s*\[\s*\w+\s*\]\s*=',
+        r'Object\.getPrototypeOf\s*\([^)]+\)\s*\[\s*\w+\s*\]\s*=',
+        r'Object\.prototype\.\w+\s*=',
+        # Constructor access
+        r'\[\s*["\']constructor["\']\s*\]\s*\[\s*["\']prototype["\']\s*\]',
+        r'\.constructor\s*\[\s*["\']prototype["\']\s*\]',
+        r'\.constructor\.prototype\s*\[\s*\w+\s*\]',
+        
+        # =====================================================================
+        # CONFIGURATION/OPTIONS MERGING
+        # =====================================================================
+        # Common config merge patterns
+        r'config\s*=\s*\{\s*\.\.\.defaults?\s*,\s*\.\.\.(?:options?|opts?|params?|args?)',
+        r'options?\s*=\s*\{\s*\.\.\.defaults?\s*,\s*\.\.\.(?:config|params?|args?)',
+        r'settings?\s*=\s*Object\.assign\s*\(\s*\{\s*\}\s*,\s*defaults?\s*,',
+        # Express/Koa middleware body merge
+        r'req\.body\s*=\s*\{\s*\.\.\.req\.body',
+        r'ctx\.request\.body\s*=\s*\{\s*\.\.\.ctx\.request\.body',
+        
+        # =====================================================================
+        # TEMPLATE/VIEW DATA INJECTION
+        # =====================================================================
+        # Rendering with merged user data
+        r'\.render\s*\(\s*["\'][^"\']+["\']\s*,\s*\{\s*\.\.\.req\.',
+        r'\.render\s*\(\s*["\'][^"\']+["\']\s*,\s*Object\.assign\s*\([^,]+,\s*req\.',
+        r'res\.locals\s*=\s*\{\s*\.\.\.req\.',
+        r'res\.locals\s*=\s*Object\.assign\s*\([^,]+,\s*req\.',
+        
+        # =====================================================================
+        # DATABASE/ORM UNSAFE UPDATES
+        # =====================================================================
+        # MongoDB-style updates with user input
+        r'\.\$set\s*\(\s*req\.body',
+        r'\.updateOne\s*\(\s*\{[^}]*\}\s*,\s*req\.body',
+        r'\.updateMany\s*\(\s*\{[^}]*\}\s*,\s*req\.body',
+        r'\.findOneAndUpdate\s*\(\s*\{[^}]*\}\s*,\s*\{\s*\.\.\.req\.body',
+        # Sequelize/ORM updates
+        r'\.update\s*\(\s*req\.body\s*[,)]',
+        r'\.update\s*\(\s*\{\s*\.\.\.req\.body',
+        
+        # =====================================================================
+        # CLASS INSTANCE POLLUTION
+        # =====================================================================
+        # Constructor with object spread
+        r'constructor\s*\([^)]*\)\s*\{[^}]*Object\.assign\s*\(\s*this\s*,',
+        r'constructor\s*\([^)]*\)\s*\{[^}]*for\s*\(\s*(?:const|let|var)\s+\w+\s+in\s+\w+\s*\)',
+        # this[key] assignment in loops
+        r'this\s*\[\s*\w+\s*\]\s*=\s*\w+\s*\[\s*\w+\s*\]',
+        r'this\s*\[\s*key\s*\]\s*=',
+        r'this\s*\[\s*prop\s*\]\s*=',
+        r'self\s*\[\s*\w+\s*\]\s*=\s*\w+\s*\[\s*\w+\s*\]',
+    ],
+    severity=Severity.HIGH,
+    languages=[".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"],
+    false_positive_patterns=[
+        # Proper prototype checks
+        r'hasOwnProperty\s*\(',
+        r'Object\.hasOwn\s*\(',
+        r'Object\.prototype\.hasOwnProperty\.call\s*\(',
+        # Key filtering/validation
+        r'(?:key|prop|property|k)\s*(?:===|!==|==|!=)\s*["\'](?:__proto__|constructor|prototype)["\']',
+        r'(?:key|prop|property)\s*\.(?:startsWith|includes)\s*\(\s*["\'](?:__|constructor|prototype)',
+        r'(?:blacklist|blocklist|denylist|forbidden|unsafe|dangerous)(?:Keys?|Props?|Properties)?',
+        r'(?:whitelist|allowlist|safelist|allowed|safe)(?:Keys?|Props?|Properties)?',
+        r'(?:isPrototypePolluted|isUnsafeKey|isSafeKey|isPolluted|checkPrototype)',
+        r'\.filter\s*\([^)]*(?:__proto__|constructor|prototype)',
+        r'(?:sanitize|validate|clean|filter)(?:Key|Prop|Input|Object)',
+        # Object.freeze/seal
+        r'Object\.freeze\s*\(',
+        r'Object\.seal\s*\(',
+        r'Object\.preventExtensions\s*\(',
+        # Safe JSON parsing
+        r'JSON\.parse\s*\([^)]+,\s*(?:reviver|sanitize)',
+        # Map/Set usage (immune to PP)
+        r'new\s+Map\s*\(',
+        r'new\s+Set\s*\(',
+        # Null prototype objects
+        r'Object\.create\s*\(\s*null\s*\)',
+        # Test/mock patterns
+        r'(?:describe|it|test|expect|mock|jest|sinon|chai)\s*\(',
+        r'\.spec\.',
+        r'\.test\.',
+    ],
+),
 
     # =========================================================================
     # SQL INJECTION PATTERNS - ENHANCED WITH TAINT TRACKING HEURISTICS
