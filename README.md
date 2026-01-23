@@ -56,21 +56,34 @@ A **cross-platform static code analysis tool** for detecting security vulnerabil
 - **String extraction** from compiled binaries
 - **Credential detection** in binaries (AWS keys, API tokens, connection strings)
 
-### 🧠 AST-Based Scanner (ast-scanner.py)
-A secondary scanner providing deeper code analysis through:
-- **Taint Tracking** - Traces user input through variable assignments
-- **Data Flow Analysis** - Follows data from sources to dangerous sinks
+### 🧠 AST-Based Scanner v2.0 (ast-scanner.py)
+A multi-language scanner providing deeper code analysis through:
+- **Taint Tracking** - Traces user input through variable assignments and function calls
+- **Data Flow Analysis** - Follows data from sources (request params, user input) to dangerous sinks
 - **Context-Aware Detection** - Understands function calls, imports, and code structure
 - **Confidence Scoring** - HIGH/MEDIUM/LOW confidence ratings for each finding
 - **Reduced False Positives** - Semantic analysis filters out safe patterns
 
+#### Supported Languages (AST Scanner)
+| Language | Extensions | Taint Sources |
+|----------|------------|---------------|
+| **Python** | `.py` | request.args/form, input(), sys.argv, os.environ |
+| **JavaScript/TypeScript** | `.js`, `.ts`, `.jsx`, `.tsx` | req.body/query/params, process.argv |
+| **Java/Kotlin/Scala** | `.java`, `.kt`, `.scala` | Method parameters, HttpServletRequest |
+| **PHP** | `.php`, `.phtml` | $_GET, $_POST, $_REQUEST, $_COOKIE, $_SERVER |
+| **C#** | `.cs` | Request.QueryString/Form/Cookies, method params |
+| **Go** | `.go` | r.FormValue(), r.URL.Query(), c.Query() (Gin) |
+| **Ruby** | `.rb`, `.erb` | params[], request, cookies, session |
+
+#### Scanner Comparison
 | Feature | vuln-scanner.py | ast-scanner.py |
 |---------|-----------------|----------------|
 | Speed | Fast | Moderate |
-| Languages | 15+ | Python, JavaScript/TypeScript |
-| Analysis Depth | Pattern matching | AST + Taint tracking |
+| Languages | 15+ | 7 (with taint tracking) |
+| Analysis Depth | Pattern matching | Taint tracking + Data flow |
 | False Positive Rate | Higher | Lower |
-| Use Case | Broad scanning | Deep analysis |
+| Taint Chain Visibility | No | Yes |
+| Use Case | Broad scanning, CI/CD | Deep analysis, verification |
 
 ---
 
@@ -166,15 +179,30 @@ python3 vuln-scanner.py /path/to/app.dll --scan-binaries --decompile
 | `--include-ext` | | Only scan these extensions |
 | `--no-default-excludes` | | Don't use default exclusion lists |
 
-### ast-scanner.py (AST-based)
+### ast-scanner.py (AST-based v2.0)
 
 | Option | Short | Description |
 |--------|-------|-------------|
 | `--output` | | Output format: `text` (default) or `json` |
 | `--output-file` | `-o` | Save report to file |
 | `--verbose` | `-v` | Show detailed scanning progress with taint tracking |
-| `--category` | `-c` | Categories: sql, nosql, code, command, deser, ssti, ssrf, auth, proto, xpath, xxe, path |
+| `--category` | `-c` | Categories: sql, nosql, code, command, deser, ssti, ssrf, auth, proto, xpath, xxe, path, xss, lfi, ldap |
 | `--min-confidence` | | Minimum confidence level: HIGH, MEDIUM, LOW (default) |
+
+#### Vulnerability Categories (AST Scanner)
+| Category | Flag | Languages | Description |
+|----------|------|-----------|-------------|
+| SQL Injection | `sql` | All | String concatenation, dynamic queries |
+| Command Injection | `command` | All | system(), exec(), Runtime.exec() |
+| Code Injection | `code` | All | eval(), reflection, dynamic execution |
+| Deserialization | `deser` | All | pickle, unserialize(), Marshal |
+| SSTI | `ssti` | Python, Go, Ruby | Template injection |
+| SSRF | `ssrf` | All | Server-side request forgery |
+| Path Traversal | `path` | All | File operations with user paths |
+| XSS | `xss` | PHP, C# | Cross-site scripting |
+| LFI/RFI | `lfi` | PHP | Local/Remote file inclusion |
+| XXE | `xxe` | Java, C# | XML External Entity |
+| LDAP Injection | `ldap` | C# | LDAP filter injection |
 
 ---
 
@@ -209,47 +237,63 @@ FILE: api/handlers/auth.js
   Line 12: const API_KEY = "sk_live_abc123xyz789"
 ```
 
-### AST Scanner Sample Output
+### AST Scanner Sample Output (v2.0)
 
 ```
+    ╔═══════════════════════════════════════════════════════════════╗
+    ║            AST-Based Vulnerability Scanner v2.0               ║
+    ║         Deeper code analysis, fewer false positives           ║
+    ╚═══════════════════════════════════════════════════════════════╝
+
 ================================================================================
 AST-BASED VULNERABILITY SCAN REPORT
 ================================================================================
 Scan Date: 2026-01-23 14:30:00
 Files Scanned: 45
 Parse Errors: 0
-Total Findings: 12
+Total Findings: 18
 
 Summary by Severity:
-  CRITICAL  : 3
-  HIGH      : 5
-  MEDIUM    : 4
+  CRITICAL  : 8
+  HIGH      : 7
+  MEDIUM    : 3
 
 Summary by Confidence:
-  HIGH      : 6
-  MEDIUM    : 4
-  LOW       : 2
+  HIGH      : 15
+  MEDIUM    : 3
 
 ================================================================================
 
-FILE: app/services/database.py
+FILE: app/controllers/UserController.java
+--------------------------------------------------------------------------------
+[CRITICAL] SQL Injection - executeQuery with tainted input (Confidence: HIGH)
+  Line 45: conn.createStatement().executeQuery(query);
+  -> User-controlled data in SQL query execution.
+  Taint: tainted: query (line 44)
+
+[CRITICAL] Command Injection - Runtime.exec with tainted input (Confidence: HIGH)
+  Line 78: Runtime.getRuntime().exec(cmd);
+  -> User-controlled data passed to Runtime.exec().
+  Taint: tainted: cmd (line 76)
+
+FILE: api/handlers/upload.php
+--------------------------------------------------------------------------------
+[CRITICAL] File Inclusion - LFI/RFI with tainted data (Confidence: HIGH)
+  Line 12: include($page);
+  -> User input in file inclusion allows LFI/RFI.
+  Taint: tainted: $page (line 10)
+
+[CRITICAL] Command Injection - Shell function with tainted data (Confidence: HIGH)
+  Line 25: system($cmd);
+  -> User input passed to shell execution function.
+  Taint: tainted: $cmd (line 23)
+
+FILE: services/database.py
 --------------------------------------------------------------------------------
 [CRITICAL] SQL Injection - execute() with tainted query (Confidence: HIGH)
   Line 23: cursor.execute(query)
-  -> User-controlled data used in SQL query without parameterization.
+  -> User-controlled data in SQL query.
   Taint: request: request.args.get('id') (line 21)
-
-[HIGH] SSRF - requests.get() with user-controlled URL (Confidence: HIGH)
-  Line 45: response = requests.get(target_url)
-  -> User-controlled URL can lead to Server-Side Request Forgery.
-  Taint: request: request.form['url'] (line 43)
-
-FILE: app/utils/template.py
---------------------------------------------------------------------------------
-[CRITICAL] SSTI - render_template_string() with user input (Confidence: HIGH)
-  Line 18: return render_template_string(user_template)
-  -> Flask render_template_string() with user input enables SSTI.
-  Taint: request: request.args.get('template') (line 15)
 ```
 
 ---
@@ -330,6 +374,88 @@ yaml.load(data)  # ✅ Detected (missing SafeLoader)
 unserialize($_GET['data'])  # ✅ Detected
 ```
 
+### Java/Kotlin Detection (AST Scanner)
+
+```java
+// SQL Injection with taint tracking
+String id = request.getParameter("id");
+String query = "SELECT * FROM users WHERE id = " + id;  // ✅ Detected
+stmt.executeQuery(query);  // ✅ Detected with taint chain
+
+// Command Injection
+String cmd = request.getParameter("cmd");
+Runtime.getRuntime().exec(cmd);  // ✅ Detected
+
+// Deserialization
+ObjectInputStream ois = new ObjectInputStream(userInput);
+ois.readObject();  // ✅ Detected
+```
+
+### PHP Detection (AST Scanner)
+
+```php
+// SQL Injection with superglobal tracking
+$id = $_GET['id'];
+mysql_query("SELECT * FROM users WHERE id = " . $id);  // ✅ Detected
+
+// Command Injection
+$cmd = $_POST['cmd'];
+system($cmd);  // ✅ Detected
+
+// LFI/RFI
+$page = $_REQUEST['page'];
+include($page);  // ✅ Detected
+```
+
+### C# Detection (AST Scanner)
+
+```csharp
+// SQL Injection
+string id = Request.QueryString["id"];
+SqlCommand cmd = new SqlCommand("SELECT * FROM users WHERE id = " + id);  // ✅ Detected
+
+// Command Injection
+string command = Request.Form["cmd"];
+Process.Start(command);  // ✅ Detected
+
+// Insecure Deserialization
+BinaryFormatter bf = new BinaryFormatter();
+bf.Deserialize(stream);  // ✅ Detected (always dangerous)
+```
+
+### Go Detection (AST Scanner)
+
+```go
+// SQL Injection
+id := r.FormValue("id")
+query := fmt.Sprintf("SELECT * FROM users WHERE id = %s", id)  // ✅ Detected
+db.Query(query)
+
+// Command Injection
+cmd := r.URL.Query().Get("cmd")
+exec.Command(cmd).Run()  // ✅ Detected
+
+// SSRF
+url := r.FormValue("url")
+http.Get(url)  // ✅ Detected
+```
+
+### Ruby Detection (AST Scanner)
+
+```ruby
+# SQL Injection
+id = params[:id]
+User.where("id = #{id}")  # ✅ Detected
+
+# Command Injection
+cmd = params[:cmd]
+system(cmd)  # ✅ Detected
+
+# Deserialization
+data = params[:data]
+Marshal.load(data)  # ✅ Detected
+```
+
 ---
 
 ## 📁 Project Structure
@@ -347,11 +473,13 @@ vuln-scanner/
 | Scenario | Recommended Scanner |
 |----------|---------------------|
 | Initial broad scan of large codebase | vuln-scanner.py |
-| Deep analysis of critical files | ast-scanner.py |
+| Deep analysis with taint tracking | ast-scanner.py |
 | CI/CD pipeline quick check | vuln-scanner.py |
 | Reviewing specific vulnerability reports | ast-scanner.py (with --min-confidence HIGH) |
-| Scanning non-Python/JS languages | vuln-scanner.py |
-| Taint tracking analysis | ast-scanner.py |
+| Need to see data flow / taint chain | ast-scanner.py |
+| Binary analysis (DLL, JAR, APK) | vuln-scanner.py |
+| Python/JS/Java/PHP/C#/Go/Ruby projects | ast-scanner.py (better accuracy) |
+| Shell scripts, C/C++, other languages | vuln-scanner.py |
 
 ---
 

@@ -1,27 +1,36 @@
 #!/usr/bin/env python3
 """
-AST-Based Vulnerability Scanner v1.0
+AST-Based Vulnerability Scanner v2.0
 =====================================
-A secondary scanner using Abstract Syntax Tree analysis to reduce false positives
-from regex-based scanning. Provides deeper code analysis through:
+A multi-language static analysis scanner using taint tracking to reduce false positives.
+Provides deeper code analysis through:
 - Taint tracking (tracing user input through variables)
-- Data flow analysis
-- Function call context analysis
-- Import and module analysis
+- Data flow analysis (following data from sources to sinks)
+- Context-aware detection (understands function calls and code structure)
+- Confidence scoring (HIGH/MEDIUM/LOW ratings)
 
-Supports: Python, JavaScript/TypeScript (basic), and provides hooks for other languages.
+Supported Languages:
+- Python (.py) - Full AST analysis with taint tracking
+- JavaScript/TypeScript (.js, .ts, .jsx, .tsx) - Regex-enhanced with taint tracking
+- Java/Kotlin/Scala (.java, .kt, .scala) - Regex-enhanced with taint tracking
+- PHP (.php, .phtml) - Regex-enhanced with taint tracking
+- C# (.cs) - Regex-enhanced with taint tracking
+- Go (.go) - Regex-enhanced with taint tracking
+- Ruby (.rb, .erb) - Regex-enhanced with taint tracking
 
-Categories covered:
-- SQL Injection
-- NoSQL Injection
-- Code Injection (eval, exec, command injection)
-- Insecure Deserialization
-- Server-Side Template Injection (SSTI)
-- Server-Side Request Forgery (SSRF)
-- Authentication Bypass
-- Prototype Pollution
-- XPath Injection
-- XXE (XML External Entity)
+Vulnerability Categories:
+- SQL Injection - String concatenation, dynamic queries, ORM misuse
+- NoSQL Injection - MongoDB, Redis injection patterns
+- Command Injection - system(), exec(), Runtime.exec(), Process.Start()
+- Code Injection - eval(), reflection, dynamic code execution
+- Insecure Deserialization - pickle, unserialize(), Marshal, BinaryFormatter
+- SSTI - Jinja2, Twig, ERB, Freemarker template injection
+- SSRF - Server-side request forgery via HTTP clients
+- Path Traversal - File operations with user-controlled paths
+- LFI/RFI - Local/Remote file inclusion (PHP)
+- XXE - XML External Entity injection
+- XSS - Cross-site scripting (reflected)
+- Authentication Bypass - Hardcoded credentials, weak comparisons
 """
 
 import os
@@ -60,6 +69,9 @@ class VulnCategory(Enum):
     XPATH_INJECTION = "XPath Injection"
     XXE = "XML External Entity"
     PATH_TRAVERSAL = "Path Traversal"
+    XSS = "Cross-Site Scripting"
+    LFI_RFI = "Local/Remote File Inclusion"
+    LDAP_INJECTION = "LDAP Injection"
 
 
 @dataclass
@@ -991,6 +1003,1318 @@ class JavaScriptAnalyzer:
                                       "Potential NoSQL injection vulnerability.")
 
 
+class JavaAnalyzer:
+    """
+    Java analyzer using regex-enhanced pattern matching with taint tracking.
+    Tracks variable assignments and method parameters to detect tainted data flow.
+    """
+
+    def __init__(self, source_code: str, file_path: str):
+        self.source_code = source_code
+        self.source_lines = source_code.splitlines()
+        self.file_path = file_path
+        self.findings: List[Finding] = []
+
+        # Track tainted variables by line scope
+        self.tainted_vars: Dict[str, int] = {}  # var_name -> line where tainted
+        self.method_params: Dict[str, Set[str]] = {}  # method_name -> set of param names
+
+        # Pre-analyze to identify taint sources
+        self._identify_method_params()
+        self._track_variable_assignments()
+
+    def _identify_method_params(self):
+        """Identify method parameters as potential taint sources."""
+        # Match method declarations with parameters
+        method_pattern = r'(?:public|private|protected|static|\s)+\s+\w+\s+(\w+)\s*\(([^)]*)\)'
+
+        for i, line in enumerate(self.source_lines, 1):
+            match = re.search(method_pattern, line)
+            if match:
+                method_name = match.group(1)
+                params_str = match.group(2)
+                if params_str.strip():
+                    # Parse parameters: "Type name, Type name, ..."
+                    params = set()
+                    for param in params_str.split(','):
+                        parts = param.strip().split()
+                        if len(parts) >= 2:
+                            param_name = parts[-1].strip()
+                            # Remove array brackets if present
+                            param_name = re.sub(r'\[\]', '', param_name)
+                            params.add(param_name)
+                            # Mark as tainted
+                            self.tainted_vars[param_name] = i
+                    self.method_params[method_name] = params
+
+    def _track_variable_assignments(self):
+        """Track variable assignments to propagate taint."""
+        # Pattern: Type varName = taintedVar; or varName = taintedVar;
+        assign_pattern = r'(?:(?:String|Object|byte\[\]|InputStream|List|Map|Set|Queue|Optional)\s+)?(\w+)\s*=\s*([^;]+);'
+
+        for i, line in enumerate(self.source_lines, 1):
+            # Skip comments
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*') or stripped.startswith('*'):
+                continue
+
+            for match in re.finditer(assign_pattern, line):
+                var_name = match.group(1)
+                rhs = match.group(2)
+
+                # Check if RHS contains any tainted variable
+                for tainted_var in list(self.tainted_vars.keys()):
+                    # Match whole word
+                    if re.search(rf'\b{re.escape(tainted_var)}\b', rhs):
+                        self.tainted_vars[var_name] = i
+                        break
+
+                # Also check for method calls that return tainted data
+                taint_methods = [
+                    r'\.get\s*\(', r'\.poll\s*\(', r'\.next\s*\(',
+                    r'\.getMessage\s*\(', r'\.getCause\s*\(',
+                    r'\.unwrap\s*\(', r'\.getCommand\s*\(',
+                    r'\.trim\s*\(', r'\.substring\s*\(',
+                    r'\.toString\s*\(', r'\.apply\s*\(',
+                    r'getParameter\s*\(', r'getHeader\s*\(',
+                ]
+                for pattern in taint_methods:
+                    if re.search(pattern, rhs):
+                        for tainted_var in list(self.tainted_vars.keys()):
+                            if re.search(rf'\b{re.escape(tainted_var)}\b', rhs):
+                                self.tainted_vars[var_name] = i
+                                break
+
+    def _is_tainted(self, line: str) -> Tuple[bool, Optional[str]]:
+        """Check if a line contains tainted data."""
+        for var_name in self.tainted_vars:
+            if re.search(rf'\b{re.escape(var_name)}\b', line):
+                return True, var_name
+        return False, None
+
+    def get_line_content(self, lineno: int) -> str:
+        """Get the source line content."""
+        if 1 <= lineno <= len(self.source_lines):
+            return self.source_lines[lineno - 1]
+        return ""
+
+    def analyze(self) -> List[Finding]:
+        """Run the analysis."""
+        self._check_sql_injection()
+        self._check_command_injection()
+        self._check_deserialization()
+        self._check_ssrf()
+        self._check_path_traversal()
+        self._check_xxe()
+        self._check_jndi_injection()
+        self._check_script_engine()
+        self._check_reflection_injection()
+        return self.findings
+
+    def _add_finding(self, line_num: int, vuln_name: str, category: VulnCategory,
+                     severity: Severity, confidence: str, taint_var: Optional[str] = None,
+                     description: str = ""):
+        """Add a finding."""
+        taint_chain = []
+        if taint_var and taint_var in self.tainted_vars:
+            taint_chain = [f"tainted: {taint_var} (line {self.tainted_vars[taint_var]})"]
+
+        finding = Finding(
+            file_path=self.file_path,
+            line_number=line_num,
+            col_offset=0,
+            line_content=self.get_line_content(line_num),
+            vulnerability_name=vuln_name,
+            category=category,
+            severity=severity,
+            confidence=confidence,
+            taint_chain=taint_chain,
+            description=description,
+        )
+        self.findings.append(finding)
+
+    def _check_sql_injection(self):
+        """Check for SQL injection patterns."""
+        sql_keywords = r'(?:SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|EXEC|EXECUTE)'
+
+        for i, line in enumerate(self.source_lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*') or stripped.startswith('*'):
+                continue
+
+            # Pattern 1: executeQuery/execute with string concatenation
+            if re.search(r'\.(?:executeQuery|execute|executeUpdate)\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+
+                # Check for string concatenation with SQL keywords
+                has_concat = '+' in line or 'concat' in line.lower() or 'format' in line.lower()
+                has_sql = re.search(sql_keywords, line, re.IGNORECASE)
+
+                if is_tainted:
+                    self._add_finding(i, "SQL Injection - executeQuery with tainted input",
+                                      VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User-controlled data in SQL query execution.")
+                elif has_concat and has_sql:
+                    self._add_finding(i, "SQL Injection - Dynamic query construction",
+                                      VulnCategory.SQL_INJECTION, Severity.HIGH, "MEDIUM",
+                                      description="SQL query uses string concatenation. Use PreparedStatement.")
+
+            # Pattern 2: String building with SQL + tainted data
+            if re.search(sql_keywords, line, re.IGNORECASE) and '+' in line:
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "SQL Injection - String concatenation with tainted data",
+                                      VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "SQL query built with user-controlled data.")
+
+            # Pattern 3: String.format with SQL
+            if 'String.format' in line and re.search(sql_keywords, line, re.IGNORECASE):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "SQL Injection - String.format with tainted data",
+                                      VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "SQL query uses String.format with user data.")
+
+            # Pattern 4: StringBuilder append with SQL
+            if re.search(r'\.append\s*\([^)]*\)', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                # Look back for SQL context
+                context = '\n'.join(self.source_lines[max(0, i-5):i])
+                if re.search(sql_keywords, context, re.IGNORECASE) and is_tainted:
+                    self._add_finding(i, "SQL Injection - StringBuilder with tainted data",
+                                      VulnCategory.SQL_INJECTION, Severity.HIGH, "MEDIUM", taint_var,
+                                      "SQL query built with StringBuilder and user data.")
+
+    def _check_command_injection(self):
+        """Check for command injection patterns."""
+        for i, line in enumerate(self.source_lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*') or stripped.startswith('*'):
+                continue
+
+            # Runtime.getRuntime().exec()
+            if re.search(r'Runtime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Command Injection - Runtime.exec with tainted input",
+                                      VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User-controlled data passed to Runtime.exec().")
+                else:
+                    # Check if using a variable (not a literal)
+                    exec_arg = re.search(r'\.exec\s*\(\s*(\w+)', line)
+                    if exec_arg:
+                        var_name = exec_arg.group(1)
+                        if var_name in self.tainted_vars:
+                            self._add_finding(i, "Command Injection - Runtime.exec with tainted variable",
+                                              VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, "HIGH", var_name,
+                                              f"Variable '{var_name}' passed to Runtime.exec().")
+
+            # ProcessBuilder
+            if re.search(r'new\s+ProcessBuilder\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Command Injection - ProcessBuilder with tainted input",
+                                      VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User-controlled data passed to ProcessBuilder.")
+
+    def _check_deserialization(self):
+        """Check for insecure deserialization patterns."""
+        for i, line in enumerate(self.source_lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*') or stripped.startswith('*'):
+                continue
+
+            # ObjectInputStream.readObject()
+            if re.search(r'ObjectInputStream|\.readObject\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+
+                # Look for ObjectInputStream creation with tainted data
+                context = '\n'.join(self.source_lines[max(0, i-3):i+1])
+                if re.search(r'new\s+ObjectInputStream\s*\(', context):
+                    if is_tainted:
+                        self._add_finding(i, "Insecure Deserialization - ObjectInputStream with tainted data",
+                                          VulnCategory.DESERIALIZATION, Severity.CRITICAL, "HIGH", taint_var,
+                                          "Deserializing user-controlled data can lead to RCE.")
+                    else:
+                        self._add_finding(i, "Insecure Deserialization - ObjectInputStream usage",
+                                          VulnCategory.DESERIALIZATION, Severity.HIGH, "MEDIUM",
+                                          description="ObjectInputStream.readObject() detected. Verify data source.")
+
+            # XMLDecoder
+            if re.search(r'XMLDecoder|\.readObject\s*\(', line) and 'XMLDecoder' in line:
+                self._add_finding(i, "Insecure Deserialization - XMLDecoder",
+                                  VulnCategory.DESERIALIZATION, Severity.CRITICAL, "HIGH",
+                                  description="XMLDecoder is dangerous and can lead to RCE.")
+
+    def _check_ssrf(self):
+        """Check for SSRF patterns."""
+        for i, line in enumerate(self.source_lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*') or stripped.startswith('*'):
+                continue
+
+            # URL construction with tainted data
+            if re.search(r'new\s+URL\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "SSRF - URL constructed with tainted data",
+                                      VulnCategory.SSRF, Severity.HIGH, "HIGH", taint_var,
+                                      "User-controlled data used in URL construction.")
+
+            # URI construction
+            if re.search(r'new\s+URI\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "SSRF - URI constructed with tainted data",
+                                      VulnCategory.SSRF, Severity.HIGH, "HIGH", taint_var,
+                                      "User-controlled data used in URI construction.")
+
+            # openConnection, openStream
+            if re.search(r'\.(?:openConnection|openStream)\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                context = '\n'.join(self.source_lines[max(0, i-3):i+1])
+                taint_in_context, ctx_var = self._is_tainted(context)
+                if is_tainted or taint_in_context:
+                    self._add_finding(i, "SSRF - HTTP connection with potentially tainted URL",
+                                      VulnCategory.SSRF, Severity.HIGH, "HIGH", taint_var or ctx_var,
+                                      "HTTP request made with potentially user-controlled URL.")
+
+            # HttpURLConnection
+            if re.search(r'HttpURLConnection', line):
+                context = '\n'.join(self.source_lines[max(0, i-5):i+1])
+                taint_in_context, ctx_var = self._is_tainted(context)
+                if taint_in_context:
+                    self._add_finding(i, "SSRF - HttpURLConnection with tainted URL",
+                                      VulnCategory.SSRF, Severity.HIGH, "MEDIUM", ctx_var,
+                                      "HTTP connection may use user-controlled URL.")
+
+    def _check_path_traversal(self):
+        """Check for path traversal patterns."""
+        for i, line in enumerate(self.source_lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*') or stripped.startswith('*'):
+                continue
+
+            # Files.readAllBytes, Files.write, etc.
+            if re.search(r'Files\s*\.\s*(?:readAllBytes|write|copy|move|delete|newInputStream|newOutputStream)\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Path Traversal - Files API with tainted path",
+                                      VulnCategory.PATH_TRAVERSAL, Severity.HIGH, "HIGH", taint_var,
+                                      "User-controlled data used in file path.")
+
+            # Paths.get
+            if re.search(r'Paths\s*\.\s*get\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted or '+' in line:
+                    context = '\n'.join(self.source_lines[max(0, i-2):i+1])
+                    ctx_taint, ctx_var = self._is_tainted(context)
+                    if is_tainted or ctx_taint:
+                        self._add_finding(i, "Path Traversal - Paths.get with tainted data",
+                                          VulnCategory.PATH_TRAVERSAL, Severity.HIGH, "HIGH", taint_var or ctx_var,
+                                          "User-controlled data used to construct file path.")
+
+            # new File()
+            if re.search(r'new\s+File\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Path Traversal - File constructed with tainted data",
+                                      VulnCategory.PATH_TRAVERSAL, Severity.HIGH, "HIGH", taint_var,
+                                      "User-controlled data used in File constructor.")
+
+            # FileInputStream, FileOutputStream, FileReader, FileWriter
+            if re.search(r'new\s+(?:FileInputStream|FileOutputStream|FileReader|FileWriter)\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted or '+' in line:
+                    self._add_finding(i, "Path Traversal - File stream with tainted path",
+                                      VulnCategory.PATH_TRAVERSAL, Severity.HIGH, "HIGH", taint_var,
+                                      "User-controlled data in file stream path.")
+
+    def _check_xxe(self):
+        """Check for XXE patterns."""
+        for i, line in enumerate(self.source_lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*') or stripped.startswith('*'):
+                continue
+
+            # DocumentBuilderFactory without secure configuration
+            if re.search(r'DocumentBuilderFactory\s*\.\s*newInstance\s*\(', line):
+                # Look for security features being set
+                context = '\n'.join(self.source_lines[i:min(len(self.source_lines), i+10)])
+                has_secure_config = re.search(
+                    r'setFeature.*(?:disallow-doctype-decl|external-general-entities|external-parameter-entities)',
+                    context
+                )
+                if not has_secure_config:
+                    self._add_finding(i, "XXE - DocumentBuilderFactory without secure configuration",
+                                      VulnCategory.XXE, Severity.HIGH, "MEDIUM",
+                                      description="DocumentBuilderFactory should disable external entities.")
+
+            # SAXParserFactory
+            if re.search(r'SAXParserFactory\s*\.\s*newInstance\s*\(', line):
+                context = '\n'.join(self.source_lines[i:min(len(self.source_lines), i+10)])
+                has_secure_config = re.search(r'setFeature.*external', context)
+                if not has_secure_config:
+                    self._add_finding(i, "XXE - SAXParserFactory without secure configuration",
+                                      VulnCategory.XXE, Severity.HIGH, "MEDIUM",
+                                      description="SAXParserFactory should disable external entities.")
+
+            # XMLInputFactory
+            if re.search(r'XMLInputFactory\s*\.\s*newInstance\s*\(', line):
+                context = '\n'.join(self.source_lines[i:min(len(self.source_lines), i+10)])
+                has_secure_config = re.search(r'setProperty.*SUPPORT_DTD|IS_SUPPORTING_EXTERNAL_ENTITIES', context)
+                if not has_secure_config:
+                    self._add_finding(i, "XXE - XMLInputFactory without secure configuration",
+                                      VulnCategory.XXE, Severity.HIGH, "MEDIUM",
+                                      description="XMLInputFactory should disable DTD and external entities.")
+
+    def _check_jndi_injection(self):
+        """Check for JNDI injection patterns."""
+        for i, line in enumerate(self.source_lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*') or stripped.startswith('*'):
+                continue
+
+            # JNDI lookup with tainted data
+            if re.search(r'\.lookup\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                context = '\n'.join(self.source_lines[max(0, i-5):i+1])
+                has_jndi_context = re.search(r'(?:InitialContext|Context|JndiTemplate)', context)
+
+                if has_jndi_context and is_tainted:
+                    self._add_finding(i, "JNDI Injection - lookup with tainted data",
+                                      VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User-controlled JNDI lookup can lead to RCE (Log4Shell-style).")
+
+    def _check_script_engine(self):
+        """Check for script engine code injection."""
+        for i, line in enumerate(self.source_lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*') or stripped.startswith('*'):
+                continue
+
+            # ScriptEngine.eval
+            if re.search(r'ScriptEngine|\.eval\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                context = '\n'.join(self.source_lines[max(0, i-5):i+1])
+                has_script_engine = re.search(r'ScriptEngine|getEngineByName', context)
+
+                if has_script_engine:
+                    if is_tainted:
+                        self._add_finding(i, "Code Injection - ScriptEngine.eval with tainted data",
+                                          VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                          "User-controlled data in ScriptEngine.eval() enables code execution.")
+                    elif re.search(r'\.eval\s*\(', line):
+                        self._add_finding(i, "Code Injection - ScriptEngine.eval usage",
+                                          VulnCategory.CODE_INJECTION, Severity.HIGH, "MEDIUM",
+                                          description="ScriptEngine.eval() detected. Verify input is not user-controlled.")
+
+    def _check_reflection_injection(self):
+        """Check for reflection-based injection."""
+        for i, line in enumerate(self.source_lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*') or stripped.startswith('*'):
+                continue
+
+            # Class.forName with tainted data
+            if re.search(r'Class\s*\.\s*forName\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Code Injection - Class.forName with tainted data",
+                                      VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User-controlled class loading can lead to code execution.")
+
+            # Method.invoke with tainted data
+            if re.search(r'\.invoke\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                context = '\n'.join(self.source_lines[max(0, i-5):i+1])
+                has_reflection = re.search(r'getMethod|getDeclaredMethod|Method\s+\w+', context)
+
+                if has_reflection and is_tainted:
+                    self._add_finding(i, "Code Injection - Reflection invoke with tainted data",
+                                      VulnCategory.CODE_INJECTION, Severity.HIGH, "MEDIUM", taint_var,
+                                      "Reflection-based method invocation with user data.")
+
+            # Constructor.newInstance with tainted data
+            if re.search(r'\.newInstance\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                context = '\n'.join(self.source_lines[max(0, i-5):i+1])
+                has_reflection = re.search(r'getConstructor|getDeclaredConstructor|Constructor', context)
+
+                if has_reflection and is_tainted:
+                    self._add_finding(i, "Code Injection - Reflection newInstance with tainted data",
+                                      VulnCategory.CODE_INJECTION, Severity.HIGH, "MEDIUM", taint_var,
+                                      "Reflection-based object creation with user data.")
+
+
+class PHPAnalyzer:
+    """
+    PHP analyzer with taint tracking for common web vulnerabilities.
+    Tracks $_GET, $_POST, $_REQUEST, $_COOKIE, $_SERVER as taint sources.
+    """
+
+    def __init__(self, source_code: str, file_path: str):
+        self.source_code = source_code
+        self.source_lines = source_code.splitlines()
+        self.file_path = file_path
+        self.findings: List[Finding] = []
+        self.tainted_vars: Dict[str, int] = {}
+
+        self._identify_taint_sources()
+        self._track_variable_assignments()
+
+    def _identify_taint_sources(self):
+        """Identify PHP superglobals and function parameters as taint sources."""
+        superglobals = [
+            r'\$_GET', r'\$_POST', r'\$_REQUEST', r'\$_COOKIE',
+            r'\$_SERVER', r'\$_FILES', r'\$_ENV', r'\$HTTP_RAW_POST_DATA',
+            r'file_get_contents\s*\(\s*["\']php://input',
+        ]
+
+        for i, line in enumerate(self.source_lines, 1):
+            for sg in superglobals:
+                if re.search(sg, line):
+                    # Extract variable being assigned
+                    match = re.search(r'\$(\w+)\s*=', line)
+                    if match:
+                        self.tainted_vars[match.group(1)] = i
+
+        # Function parameters
+        func_pattern = r'function\s+\w+\s*\(([^)]*)\)'
+        for i, line in enumerate(self.source_lines, 1):
+            match = re.search(func_pattern, line)
+            if match:
+                params = match.group(1)
+                for param in re.findall(r'\$(\w+)', params):
+                    self.tainted_vars[param] = i
+
+    def _track_variable_assignments(self):
+        """Track variable assignments to propagate taint."""
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//') or line.strip().startswith('#'):
+                continue
+            match = re.search(r'\$(\w+)\s*=\s*(.+?);', line)
+            if match:
+                var_name = match.group(1)
+                rhs = match.group(2)
+                for tainted in list(self.tainted_vars.keys()):
+                    if re.search(rf'\${re.escape(tainted)}\b', rhs):
+                        self.tainted_vars[var_name] = i
+                        break
+
+    def _is_tainted(self, line: str) -> Tuple[bool, Optional[str]]:
+        for var in self.tainted_vars:
+            if re.search(rf'\${re.escape(var)}\b', line):
+                return True, var
+        # Check direct superglobal use
+        if re.search(r'\$_(GET|POST|REQUEST|COOKIE|SERVER|FILES)\s*\[', line):
+            return True, '$_REQUEST'
+        return False, None
+
+    def get_line_content(self, lineno: int) -> str:
+        if 1 <= lineno <= len(self.source_lines):
+            return self.source_lines[lineno - 1]
+        return ""
+
+    def analyze(self) -> List[Finding]:
+        self._check_sql_injection()
+        self._check_command_injection()
+        self._check_code_injection()
+        self._check_file_inclusion()
+        self._check_xss()
+        self._check_deserialization()
+        self._check_ssrf()
+        self._check_path_traversal()
+        return self.findings
+
+    def _add_finding(self, line_num: int, vuln_name: str, category: VulnCategory,
+                     severity: Severity, confidence: str, taint_var: Optional[str] = None,
+                     description: str = ""):
+        taint_chain = []
+        if taint_var and taint_var in self.tainted_vars:
+            taint_chain = [f"tainted: ${taint_var} (line {self.tainted_vars[taint_var]})"]
+        elif taint_var:
+            taint_chain = [f"tainted: {taint_var}"]
+
+        self.findings.append(Finding(
+            file_path=self.file_path, line_number=line_num, col_offset=0,
+            line_content=self.get_line_content(line_num),
+            vulnerability_name=vuln_name, category=category,
+            severity=severity, confidence=confidence,
+            taint_chain=taint_chain, description=description,
+        ))
+
+    def _check_sql_injection(self):
+        sql_funcs = r'(?:mysql_query|mysqli_query|pg_query|sqlite_query|mssql_query|odbc_exec|->query|->prepare|->exec)'
+        sql_keywords = r'(?:SELECT|INSERT|UPDATE|DELETE|DROP|UNION|FROM|WHERE)'
+
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//') or line.strip().startswith('#'):
+                continue
+
+            # Direct query with concatenation
+            if re.search(sql_funcs, line) or re.search(sql_keywords, line, re.IGNORECASE):
+                is_tainted, taint_var = self._is_tainted(line)
+                has_concat = '.' in line or '+' in line or re.search(r'\$\w+', line)
+
+                if is_tainted and (re.search(sql_funcs, line) or re.search(sql_keywords, line, re.IGNORECASE)):
+                    self._add_finding(i, "SQL Injection - Query with tainted data",
+                                      VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User input directly in SQL query.")
+
+    def _check_command_injection(self):
+        cmd_funcs = r'\b(system|exec|shell_exec|passthru|popen|proc_open|pcntl_exec|eval)\s*\('
+
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+            if re.search(cmd_funcs, line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Command Injection - Shell function with tainted data",
+                                      VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User input passed to shell execution function.")
+                elif re.search(r'\$\w+', line):
+                    self._add_finding(i, "Command Injection - Shell function with variable",
+                                      VulnCategory.COMMAND_INJECTION, Severity.HIGH, "MEDIUM",
+                                      description="Variable passed to shell function. Verify source.")
+
+            # Backtick execution
+            if '`' in line and re.search(r'`[^`]*\$', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Command Injection - Backtick with tainted data",
+                                      VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User input in backtick command execution.")
+
+    def _check_code_injection(self):
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+
+            # eval()
+            if re.search(r'\beval\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Code Injection - eval() with tainted data",
+                                      VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User input passed to eval().")
+
+            # preg_replace with /e modifier
+            if re.search(r'preg_replace\s*\([^,]*["\'][^"\']*\/e["\']', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                self._add_finding(i, "Code Injection - preg_replace with /e modifier",
+                                  VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                  "preg_replace /e modifier allows code execution.")
+
+            # create_function
+            if re.search(r'create_function\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Code Injection - create_function with tainted data",
+                                      VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User input in create_function().")
+
+            # assert()
+            if re.search(r'\bassert\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Code Injection - assert() with tainted data",
+                                      VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User input passed to assert().")
+
+    def _check_file_inclusion(self):
+        include_funcs = r'\b(include|include_once|require|require_once)\s*[\(\s]'
+
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+            if re.search(include_funcs, line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "File Inclusion - LFI/RFI with tainted data",
+                                      VulnCategory.LFI_RFI, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User input in file inclusion allows LFI/RFI.")
+                elif re.search(r'\$\w+', line):
+                    self._add_finding(i, "File Inclusion - Dynamic include",
+                                      VulnCategory.PATH_TRAVERSAL, Severity.HIGH, "MEDIUM",
+                                      description="Variable in file inclusion. Verify source.")
+
+    def _check_xss(self):
+        output_funcs = r'\b(echo|print|printf|print_r|var_dump)\s*[\(\s]'
+
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+            if re.search(output_funcs, line):
+                is_tainted, taint_var = self._is_tainted(line)
+                # Check if escaped
+                has_escape = re.search(r'htmlspecialchars|htmlentities|strip_tags|esc_html', line)
+                if is_tainted and not has_escape:
+                    self._add_finding(i, "XSS - Unescaped output with tainted data",
+                                      VulnCategory.XSS, Severity.HIGH, "MEDIUM", taint_var,
+                                      "User input output without escaping.")
+
+    def _check_deserialization(self):
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+            if re.search(r'\bunserialize\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Insecure Deserialization - unserialize with tainted data",
+                                      VulnCategory.DESERIALIZATION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User input passed to unserialize() can lead to RCE.")
+                else:
+                    self._add_finding(i, "Insecure Deserialization - unserialize usage",
+                                      VulnCategory.DESERIALIZATION, Severity.HIGH, "MEDIUM",
+                                      description="unserialize() detected. Verify data source.")
+
+    def _check_ssrf(self):
+        url_funcs = r'\b(file_get_contents|curl_init|curl_setopt|fopen|readfile|get_headers)\s*\('
+
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+            if re.search(url_funcs, line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "SSRF - URL function with tainted data",
+                                      VulnCategory.SSRF, Severity.HIGH, "HIGH", taint_var,
+                                      "User-controlled URL in request function.")
+
+    def _check_path_traversal(self):
+        file_funcs = r'\b(fopen|file_get_contents|readfile|file|unlink|rmdir|mkdir|copy|rename|move_uploaded_file)\s*\('
+
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+            if re.search(file_funcs, line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Path Traversal - File function with tainted path",
+                                      VulnCategory.PATH_TRAVERSAL, Severity.HIGH, "HIGH", taint_var,
+                                      "User input in file path allows traversal.")
+
+
+class CSharpAnalyzer:
+    """
+    C# analyzer with taint tracking for ASP.NET and general C# vulnerabilities.
+    """
+
+    def __init__(self, source_code: str, file_path: str):
+        self.source_code = source_code
+        self.source_lines = source_code.splitlines()
+        self.file_path = file_path
+        self.findings: List[Finding] = []
+        self.tainted_vars: Dict[str, int] = {}
+
+        self._identify_taint_sources()
+        self._track_variable_assignments()
+
+    def _identify_taint_sources(self):
+        """Identify ASP.NET request objects and method parameters as taint sources."""
+        taint_patterns = [
+            r'Request\s*\[', r'Request\.QueryString', r'Request\.Form',
+            r'Request\.Cookies', r'Request\.Headers', r'Request\.Params',
+            r'Request\.RawUrl', r'Request\.Url', r'Request\.Path',
+            r'HttpContext\.Current\.Request',
+        ]
+
+        for i, line in enumerate(self.source_lines, 1):
+            for pattern in taint_patterns:
+                if re.search(pattern, line):
+                    match = re.search(r'(?:var|string|object)\s+(\w+)\s*=', line)
+                    if match:
+                        self.tainted_vars[match.group(1)] = i
+
+        # Method parameters
+        for i, line in enumerate(self.source_lines, 1):
+            match = re.search(r'(?:public|private|protected|internal)\s+\w+\s+\w+\s*\(([^)]+)\)', line)
+            if match:
+                params = match.group(1)
+                for param_match in re.finditer(r'(?:\w+(?:<[^>]+>)?)\s+(\w+)', params):
+                    self.tainted_vars[param_match.group(1)] = i
+
+    def _track_variable_assignments(self):
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+            match = re.search(r'(?:var|string|object|int)\s+(\w+)\s*=\s*(.+?);', line)
+            if match:
+                var_name = match.group(1)
+                rhs = match.group(2)
+                for tainted in list(self.tainted_vars.keys()):
+                    if re.search(rf'\b{re.escape(tainted)}\b', rhs):
+                        self.tainted_vars[var_name] = i
+                        break
+
+    def _is_tainted(self, line: str) -> Tuple[bool, Optional[str]]:
+        for var in self.tainted_vars:
+            if re.search(rf'\b{re.escape(var)}\b', line):
+                return True, var
+        if re.search(r'Request\s*[\[.]', line):
+            return True, 'Request'
+        return False, None
+
+    def get_line_content(self, lineno: int) -> str:
+        if 1 <= lineno <= len(self.source_lines):
+            return self.source_lines[lineno - 1]
+        return ""
+
+    def analyze(self) -> List[Finding]:
+        self._check_sql_injection()
+        self._check_command_injection()
+        self._check_deserialization()
+        self._check_path_traversal()
+        self._check_xxe()
+        self._check_ldap_injection()
+        self._check_xss()
+        return self.findings
+
+    def _add_finding(self, line_num: int, vuln_name: str, category: VulnCategory,
+                     severity: Severity, confidence: str, taint_var: Optional[str] = None,
+                     description: str = ""):
+        taint_chain = []
+        if taint_var and taint_var in self.tainted_vars:
+            taint_chain = [f"tainted: {taint_var} (line {self.tainted_vars[taint_var]})"]
+        elif taint_var:
+            taint_chain = [f"tainted: {taint_var}"]
+
+        self.findings.append(Finding(
+            file_path=self.file_path, line_number=line_num, col_offset=0,
+            line_content=self.get_line_content(line_num),
+            vulnerability_name=vuln_name, category=category,
+            severity=severity, confidence=confidence,
+            taint_chain=taint_chain, description=description,
+        ))
+
+    def _check_sql_injection(self):
+        sql_patterns = [
+            r'\.ExecuteReader\s*\(', r'\.ExecuteNonQuery\s*\(', r'\.ExecuteScalar\s*\(',
+            r'SqlCommand\s*\(', r'new\s+SqlCommand\s*\(',
+            r'\.CommandText\s*=',
+        ]
+        sql_keywords = r'(?:SELECT|INSERT|UPDATE|DELETE|DROP|EXEC|EXECUTE)'
+
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+
+            for pattern in sql_patterns:
+                if re.search(pattern, line):
+                    is_tainted, taint_var = self._is_tainted(line)
+                    has_concat = '+' in line or '$"' in line or 'String.Format' in line
+
+                    if is_tainted:
+                        self._add_finding(i, "SQL Injection - SqlCommand with tainted data",
+                                          VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                          "User input in SQL command.")
+                    elif has_concat and re.search(sql_keywords, line, re.IGNORECASE):
+                        self._add_finding(i, "SQL Injection - Dynamic query construction",
+                                          VulnCategory.SQL_INJECTION, Severity.HIGH, "MEDIUM",
+                                          description="SQL uses string concatenation. Use parameterized queries.")
+
+    def _check_command_injection(self):
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+
+            if re.search(r'Process\.Start\s*\(|ProcessStartInfo', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Command Injection - Process.Start with tainted data",
+                                      VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User input passed to Process.Start().")
+
+    def _check_deserialization(self):
+        deser_patterns = [
+            r'BinaryFormatter', r'\.Deserialize\s*\(',
+            r'JsonConvert\.DeserializeObject', r'XmlSerializer',
+            r'DataContractSerializer', r'NetDataContractSerializer',
+            r'ObjectStateFormatter', r'LosFormatter',
+            r'SoapFormatter', r'JavaScriptSerializer',
+        ]
+
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+
+            for pattern in deser_patterns:
+                if re.search(pattern, line):
+                    is_tainted, taint_var = self._is_tainted(line)
+                    if 'BinaryFormatter' in line or 'NetDataContractSerializer' in line:
+                        self._add_finding(i, f"Insecure Deserialization - {pattern.split('|')[0]}",
+                                          VulnCategory.DESERIALIZATION, Severity.CRITICAL, "HIGH", taint_var,
+                                          "Dangerous deserializer can lead to RCE.")
+                    elif is_tainted:
+                        self._add_finding(i, "Insecure Deserialization - Deserialize with tainted data",
+                                          VulnCategory.DESERIALIZATION, Severity.HIGH, "MEDIUM", taint_var,
+                                          "User data being deserialized.")
+
+    def _check_path_traversal(self):
+        file_patterns = [
+            r'File\.ReadAllText\s*\(', r'File\.ReadAllBytes\s*\(',
+            r'File\.WriteAllText\s*\(', r'File\.Open\s*\(',
+            r'File\.Delete\s*\(', r'Directory\.CreateDirectory\s*\(',
+            r'Path\.Combine\s*\(', r'StreamReader\s*\(',
+            r'FileStream\s*\(',
+        ]
+
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+
+            for pattern in file_patterns:
+                if re.search(pattern, line):
+                    is_tainted, taint_var = self._is_tainted(line)
+                    if is_tainted:
+                        self._add_finding(i, "Path Traversal - File operation with tainted path",
+                                          VulnCategory.PATH_TRAVERSAL, Severity.HIGH, "HIGH", taint_var,
+                                          "User input in file path.")
+
+    def _check_xxe(self):
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+
+            if re.search(r'XmlDocument|XmlReader|XmlTextReader', line):
+                context = '\n'.join(self.source_lines[i:min(len(self.source_lines), i+10)])
+                has_secure = re.search(r'DtdProcessing\s*=\s*DtdProcessing\.Prohibit|XmlResolver\s*=\s*null', context)
+                if not has_secure:
+                    self._add_finding(i, "XXE - XML parser without secure configuration",
+                                      VulnCategory.XXE, Severity.HIGH, "MEDIUM",
+                                      description="XML parser should disable DTD processing.")
+
+    def _check_ldap_injection(self):
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+
+            if re.search(r'DirectorySearcher|\.Filter\s*=', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "LDAP Injection - Filter with tainted data",
+                                      VulnCategory.LDAP_INJECTION, Severity.HIGH, "HIGH", taint_var,
+                                      "User input in LDAP filter.")
+
+    def _check_xss(self):
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+
+            if re.search(r'Response\.Write\s*\(|@Html\.Raw\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                has_encode = re.search(r'HtmlEncode|AntiXss|Encoder\.', line)
+                if is_tainted and not has_encode:
+                    self._add_finding(i, "XSS - Unencoded output with tainted data",
+                                      VulnCategory.XSS, Severity.HIGH, "MEDIUM", taint_var,
+                                      "User input output without encoding.")
+
+
+class GoAnalyzer:
+    """
+    Go analyzer with taint tracking for common vulnerabilities.
+    """
+
+    def __init__(self, source_code: str, file_path: str):
+        self.source_code = source_code
+        self.source_lines = source_code.splitlines()
+        self.file_path = file_path
+        self.findings: List[Finding] = []
+        self.tainted_vars: Dict[str, int] = {}
+
+        self._identify_taint_sources()
+        self._track_variable_assignments()
+
+    def _identify_taint_sources(self):
+        """Identify HTTP request data and function parameters as taint sources."""
+        taint_patterns = [
+            r'r\.URL\.Query\(\)', r'r\.FormValue\s*\(', r'r\.PostFormValue\s*\(',
+            r'r\.Header\.Get\s*\(', r'r\.Body', r'c\.Query\s*\(', r'c\.Param\s*\(',
+            r'c\.PostForm\s*\(', r'c\.GetHeader\s*\(',
+            r'os\.Args', r'flag\.\w+\s*\(',
+        ]
+
+        for i, line in enumerate(self.source_lines, 1):
+            for pattern in taint_patterns:
+                if re.search(pattern, line):
+                    match = re.search(r'(\w+)\s*:?=', line)
+                    if match:
+                        self.tainted_vars[match.group(1)] = i
+
+        # Function parameters
+        for i, line in enumerate(self.source_lines, 1):
+            match = re.search(r'func\s+(?:\([^)]+\)\s+)?\w+\s*\(([^)]+)\)', line)
+            if match:
+                params = match.group(1)
+                for param in re.findall(r'(\w+)\s+\w+', params):
+                    self.tainted_vars[param] = i
+
+    def _track_variable_assignments(self):
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+            match = re.search(r'(\w+)\s*:?=\s*(.+)', line)
+            if match:
+                var_name = match.group(1)
+                rhs = match.group(2)
+                for tainted in list(self.tainted_vars.keys()):
+                    if re.search(rf'\b{re.escape(tainted)}\b', rhs):
+                        self.tainted_vars[var_name] = i
+                        break
+
+    def _is_tainted(self, line: str) -> Tuple[bool, Optional[str]]:
+        for var in self.tainted_vars:
+            if re.search(rf'\b{re.escape(var)}\b', line):
+                return True, var
+        return False, None
+
+    def get_line_content(self, lineno: int) -> str:
+        if 1 <= lineno <= len(self.source_lines):
+            return self.source_lines[lineno - 1]
+        return ""
+
+    def analyze(self) -> List[Finding]:
+        self._check_sql_injection()
+        self._check_command_injection()
+        self._check_path_traversal()
+        self._check_ssrf()
+        self._check_ssti()
+        return self.findings
+
+    def _add_finding(self, line_num: int, vuln_name: str, category: VulnCategory,
+                     severity: Severity, confidence: str, taint_var: Optional[str] = None,
+                     description: str = ""):
+        taint_chain = []
+        if taint_var and taint_var in self.tainted_vars:
+            taint_chain = [f"tainted: {taint_var} (line {self.tainted_vars[taint_var]})"]
+
+        self.findings.append(Finding(
+            file_path=self.file_path, line_number=line_num, col_offset=0,
+            line_content=self.get_line_content(line_num),
+            vulnerability_name=vuln_name, category=category,
+            severity=severity, confidence=confidence,
+            taint_chain=taint_chain, description=description,
+        ))
+
+    def _check_sql_injection(self):
+        sql_patterns = [
+            r'\.Query\s*\(', r'\.QueryRow\s*\(', r'\.Exec\s*\(',
+            r'\.QueryContext\s*\(', r'\.ExecContext\s*\(',
+        ]
+        sql_keywords = r'(?:SELECT|INSERT|UPDATE|DELETE|DROP)'
+
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+
+            for pattern in sql_patterns:
+                if re.search(pattern, line):
+                    is_tainted, taint_var = self._is_tainted(line)
+                    # Check for string concatenation or fmt.Sprintf
+                    has_concat = '+' in line or 'fmt.Sprintf' in line or 'fmt.Sprint' in line
+
+                    if is_tainted and has_concat:
+                        self._add_finding(i, "SQL Injection - Query with tainted data",
+                                          VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                          "User input concatenated in SQL query.")
+
+            if 'fmt.Sprintf' in line and re.search(sql_keywords, line, re.IGNORECASE):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "SQL Injection - fmt.Sprintf with SQL and tainted data",
+                                      VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User input in fmt.Sprintf SQL query.")
+
+    def _check_command_injection(self):
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+
+            if re.search(r'exec\.Command\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Command Injection - exec.Command with tainted data",
+                                      VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User input passed to exec.Command().")
+
+            if re.search(r'os\.StartProcess\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Command Injection - os.StartProcess with tainted data",
+                                      VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User input passed to os.StartProcess().")
+
+    def _check_path_traversal(self):
+        file_patterns = [
+            r'os\.Open\s*\(', r'os\.Create\s*\(', r'os\.ReadFile\s*\(',
+            r'ioutil\.ReadFile\s*\(', r'ioutil\.WriteFile\s*\(',
+            r'filepath\.Join\s*\(', r'http\.ServeFile\s*\(',
+        ]
+
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+
+            for pattern in file_patterns:
+                if re.search(pattern, line):
+                    is_tainted, taint_var = self._is_tainted(line)
+                    if is_tainted:
+                        self._add_finding(i, "Path Traversal - File operation with tainted path",
+                                          VulnCategory.PATH_TRAVERSAL, Severity.HIGH, "HIGH", taint_var,
+                                          "User input in file path.")
+
+    def _check_ssrf(self):
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+
+            if re.search(r'http\.Get\s*\(|http\.Post\s*\(|http\.NewRequest\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "SSRF - HTTP request with tainted URL",
+                                      VulnCategory.SSRF, Severity.HIGH, "HIGH", taint_var,
+                                      "User-controlled URL in HTTP request.")
+
+    def _check_ssti(self):
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+
+            if re.search(r'template\.New\s*\([^)]*\)\.Parse\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "SSTI - Template parsing with tainted data",
+                                      VulnCategory.SSTI, Severity.HIGH, "HIGH", taint_var,
+                                      "User input parsed as template.")
+
+
+class RubyAnalyzer:
+    """
+    Ruby analyzer with taint tracking for Rails and general Ruby vulnerabilities.
+    """
+
+    def __init__(self, source_code: str, file_path: str):
+        self.source_code = source_code
+        self.source_lines = source_code.splitlines()
+        self.file_path = file_path
+        self.findings: List[Finding] = []
+        self.tainted_vars: Dict[str, int] = {}
+
+        self._identify_taint_sources()
+        self._track_variable_assignments()
+
+    def _identify_taint_sources(self):
+        """Identify Rails params, request data, and method parameters."""
+        taint_patterns = [
+            r'\bparams\s*\[', r'\brequest\.', r'\bcookies\s*\[',
+            r'\bsession\s*\[', r'\.query_parameters', r'\.request_parameters',
+            r'ARGV', r'gets\b', r'STDIN\.',
+        ]
+
+        for i, line in enumerate(self.source_lines, 1):
+            for pattern in taint_patterns:
+                if re.search(pattern, line):
+                    match = re.search(r'(\w+)\s*=', line)
+                    if match:
+                        self.tainted_vars[match.group(1)] = i
+
+        # Method parameters
+        for i, line in enumerate(self.source_lines, 1):
+            match = re.search(r'def\s+\w+\s*\(([^)]+)\)', line)
+            if match:
+                params = match.group(1)
+                for param in re.findall(r'(\w+)', params):
+                    if param not in ['self']:
+                        self.tainted_vars[param] = i
+
+    def _track_variable_assignments(self):
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('#'):
+                continue
+            match = re.search(r'(\w+)\s*=\s*(.+)', line)
+            if match:
+                var_name = match.group(1)
+                rhs = match.group(2)
+                for tainted in list(self.tainted_vars.keys()):
+                    if re.search(rf'\b{re.escape(tainted)}\b', rhs):
+                        self.tainted_vars[var_name] = i
+                        break
+
+    def _is_tainted(self, line: str) -> Tuple[bool, Optional[str]]:
+        for var in self.tainted_vars:
+            if re.search(rf'\b{re.escape(var)}\b', line):
+                return True, var
+        if re.search(r'\bparams\s*\[', line):
+            return True, 'params'
+        return False, None
+
+    def get_line_content(self, lineno: int) -> str:
+        if 1 <= lineno <= len(self.source_lines):
+            return self.source_lines[lineno - 1]
+        return ""
+
+    def analyze(self) -> List[Finding]:
+        self._check_sql_injection()
+        self._check_command_injection()
+        self._check_code_injection()
+        self._check_deserialization()
+        self._check_path_traversal()
+        self._check_ssrf()
+        self._check_ssti()
+        return self.findings
+
+    def _add_finding(self, line_num: int, vuln_name: str, category: VulnCategory,
+                     severity: Severity, confidence: str, taint_var: Optional[str] = None,
+                     description: str = ""):
+        taint_chain = []
+        if taint_var and taint_var in self.tainted_vars:
+            taint_chain = [f"tainted: {taint_var} (line {self.tainted_vars[taint_var]})"]
+        elif taint_var:
+            taint_chain = [f"tainted: {taint_var}"]
+
+        self.findings.append(Finding(
+            file_path=self.file_path, line_number=line_num, col_offset=0,
+            line_content=self.get_line_content(line_num),
+            vulnerability_name=vuln_name, category=category,
+            severity=severity, confidence=confidence,
+            taint_chain=taint_chain, description=description,
+        ))
+
+    def _check_sql_injection(self):
+        sql_patterns = [
+            r'\.where\s*\(["\']', r'\.find_by_sql\s*\(',
+            r'\.execute\s*\(', r'\.select\s*\(["\']',
+            r'\.joins\s*\(["\']', r'\.order\s*\(["\']',
+        ]
+
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('#'):
+                continue
+
+            for pattern in sql_patterns:
+                if re.search(pattern, line):
+                    is_tainted, taint_var = self._is_tainted(line)
+                    has_interp = '#{' in line
+
+                    if is_tainted or has_interp:
+                        if is_tainted:
+                            self._add_finding(i, "SQL Injection - ActiveRecord with tainted data",
+                                              VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                              "User input in SQL query.")
+                        elif has_interp:
+                            self._add_finding(i, "SQL Injection - String interpolation in query",
+                                              VulnCategory.SQL_INJECTION, Severity.HIGH, "MEDIUM",
+                                              description="String interpolation in SQL. Use parameterized queries.")
+
+    def _check_command_injection(self):
+        cmd_patterns = [
+            r'\bsystem\s*\(', r'\bexec\s*\(', r'\b`[^`]+`',
+            r'%x\{', r'%x\[', r'IO\.popen\s*\(',
+            r'Open3\.', r'Kernel\.system', r'Kernel\.exec',
+        ]
+
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('#'):
+                continue
+
+            for pattern in cmd_patterns:
+                if re.search(pattern, line):
+                    is_tainted, taint_var = self._is_tainted(line)
+                    has_interp = '#{' in line
+
+                    if is_tainted or has_interp:
+                        self._add_finding(i, "Command Injection - Shell execution with tainted data",
+                                          VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                          "User input in shell command.")
+
+    def _check_code_injection(self):
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('#'):
+                continue
+
+            if re.search(r'\beval\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Code Injection - eval with tainted data",
+                                      VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User input passed to eval().")
+
+            if re.search(r'\.constantize\b|\.safe_constantize\b', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Code Injection - constantize with tainted data",
+                                      VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User input in constantize can load arbitrary classes.")
+
+            if re.search(r'\.send\s*\(|\.public_send\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Code Injection - send with tainted method name",
+                                      VulnCategory.CODE_INJECTION, Severity.HIGH, "MEDIUM", taint_var,
+                                      "User-controlled method invocation.")
+
+    def _check_deserialization(self):
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('#'):
+                continue
+
+            if re.search(r'Marshal\.load\s*\(|YAML\.load\s*\(', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Insecure Deserialization - Marshal/YAML.load with tainted data",
+                                      VulnCategory.DESERIALIZATION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User input in deserialization can lead to RCE.")
+                else:
+                    self._add_finding(i, "Insecure Deserialization - Marshal/YAML.load usage",
+                                      VulnCategory.DESERIALIZATION, Severity.HIGH, "MEDIUM",
+                                      description="Marshal/YAML.load detected. Use YAML.safe_load instead.")
+
+    def _check_path_traversal(self):
+        file_patterns = [
+            r'File\.read\s*\(', r'File\.open\s*\(', r'File\.write\s*\(',
+            r'File\.delete\s*\(', r'FileUtils\.', r'IO\.read\s*\(',
+            r'send_file\s*\(', r'send_data\s*\(',
+        ]
+
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('#'):
+                continue
+
+            for pattern in file_patterns:
+                if re.search(pattern, line):
+                    is_tainted, taint_var = self._is_tainted(line)
+                    if is_tainted:
+                        self._add_finding(i, "Path Traversal - File operation with tainted path",
+                                          VulnCategory.PATH_TRAVERSAL, Severity.HIGH, "HIGH", taint_var,
+                                          "User input in file path.")
+
+    def _check_ssrf(self):
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('#'):
+                continue
+
+            if re.search(r'Net::HTTP\.|HTTParty\.|RestClient\.|Faraday\.|open-uri|URI\.open', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "SSRF - HTTP request with tainted URL",
+                                      VulnCategory.SSRF, Severity.HIGH, "HIGH", taint_var,
+                                      "User-controlled URL in HTTP request.")
+
+    def _check_ssti(self):
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('#'):
+                continue
+
+            if re.search(r'ERB\.new\s*\(|render\s+inline:', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "SSTI - ERB template with tainted data",
+                                      VulnCategory.SSTI, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User input in ERB template.")
+
+
 class ASTScanner:
     """Main scanner class that orchestrates AST-based analysis."""
 
@@ -1001,6 +2325,18 @@ class ASTScanner:
         '.jsx': 'javascript',
         '.tsx': 'typescript',
         '.mjs': 'javascript',
+        '.java': 'java',
+        '.kt': 'kotlin',
+        '.scala': 'scala',
+        '.php': 'php',
+        '.php3': 'php',
+        '.php4': 'php',
+        '.php5': 'php',
+        '.phtml': 'php',
+        '.cs': 'csharp',
+        '.go': 'go',
+        '.rb': 'ruby',
+        '.erb': 'ruby',
     }
 
     DEFAULT_EXCLUDES = {
@@ -1056,6 +2392,16 @@ class ASTScanner:
                 findings = self._scan_python(source_code, str(file_path))
             elif lang in ('javascript', 'typescript'):
                 findings = self._scan_javascript(source_code, str(file_path))
+            elif lang in ('java', 'kotlin', 'scala'):
+                findings = self._scan_java(source_code, str(file_path))
+            elif lang == 'php':
+                findings = self._scan_php(source_code, str(file_path))
+            elif lang == 'csharp':
+                findings = self._scan_csharp(source_code, str(file_path))
+            elif lang == 'go':
+                findings = self._scan_go(source_code, str(file_path))
+            elif lang == 'ruby':
+                findings = self._scan_ruby(source_code, str(file_path))
         except Exception as e:
             self.log(f"Error scanning {file_path}: {e}")
             self.parse_errors += 1
@@ -1083,6 +2429,36 @@ class ASTScanner:
         findings = analyzer.analyze()
         return self._filter_findings(findings)
 
+    def _scan_java(self, source_code: str, file_path: str) -> List[Finding]:
+        """Scan Java/Kotlin/Scala source code."""
+        analyzer = JavaAnalyzer(source_code, file_path)
+        findings = analyzer.analyze()
+        return self._filter_findings(findings)
+
+    def _scan_php(self, source_code: str, file_path: str) -> List[Finding]:
+        """Scan PHP source code."""
+        analyzer = PHPAnalyzer(source_code, file_path)
+        findings = analyzer.analyze()
+        return self._filter_findings(findings)
+
+    def _scan_csharp(self, source_code: str, file_path: str) -> List[Finding]:
+        """Scan C# source code."""
+        analyzer = CSharpAnalyzer(source_code, file_path)
+        findings = analyzer.analyze()
+        return self._filter_findings(findings)
+
+    def _scan_go(self, source_code: str, file_path: str) -> List[Finding]:
+        """Scan Go source code."""
+        analyzer = GoAnalyzer(source_code, file_path)
+        findings = analyzer.analyze()
+        return self._filter_findings(findings)
+
+    def _scan_ruby(self, source_code: str, file_path: str) -> List[Finding]:
+        """Scan Ruby source code."""
+        analyzer = RubyAnalyzer(source_code, file_path)
+        findings = analyzer.analyze()
+        return self._filter_findings(findings)
+
     def _filter_findings(self, findings: List[Finding]) -> List[Finding]:
         """Filter findings by category if specified."""
         if not self.categories:
@@ -1102,6 +2478,10 @@ class ASTScanner:
             'xpath': VulnCategory.XPATH_INJECTION,
             'xxe': VulnCategory.XXE,
             'path': VulnCategory.PATH_TRAVERSAL,
+            'xss': VulnCategory.XSS,
+            'lfi': VulnCategory.LFI_RFI,
+            'rfi': VulnCategory.LFI_RFI,
+            'ldap': VulnCategory.LDAP_INJECTION,
         }
 
         allowed = set()
@@ -1294,10 +2674,17 @@ def main():
 
     # Print banner
     print("""
-    ╔═══════════════════════════════════════════════════════════════╗
-    ║            AST-Based Vulnerability Scanner v1.0               ║
-    ║         Deeper code analysis, fewer false positives           ║
-    ╚═══════════════════════════════════════════════════════════════╝
+██╗    ██╗ ██████╗ ██████╗ ██╗     ██████╗ ████████╗██████╗ ███████╗███████╗██████╗  ██████╗ ██╗   ██╗
+██║    ██║██╔═══██╗██╔══██╗██║     ██╔══██╗╚══██╔══╝██╔══██╗██╔════╝██╔════╝██╔══██╗██╔═══██╗╚██╗ ██╔╝
+██║ █╗ ██║██║   ██║██████╔╝██║     ██║  ██║   ██║   ██████╔╝█████╗  █████╗  ██████╔╝██║   ██║ ╚████╔╝
+██║███╗██║██║   ██║██╔══██╗██║     ██║  ██║   ██║   ██╔══██╗██╔══╝  ██╔══╝  ██╔══██╗██║   ██║  ╚██╔╝
+╚███╔███╔╝╚██████╔╝██║  ██║███████╗██████╔╝   ██║   ██║  ██║███████╗███████╗██████╔╝╚██████╔╝   ██║
+ ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═════╝    ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚═════╝  ╚═════╝    ╚═╝
+                        ╔═╗╔═╗╔╦╗  ╔╗ ┌─┐┌─┐┌─┐┌┬┐  ╔═╗┌─┐┌─┐┌┐┌┌┐┌┌─┐┬─┐
+                        ╠═╣╚═╗ ║   ╠╩╗├─┤└─┐├┤  ││  ╚═╗│  ├─┤││││││├┤ ├┬┘
+                        ╩ ╩╚═╝ ╩   ╚═╝┴ ┴└─┘└─┘─┴┘  ╚═╝└─┘┴ ┴┘└┘┘└┘└─┘┴└─
+                                   Security Scanner v2.0
+                      Taint Tracking | Multi-Language | Deep Analysis
     """)
 
     scanner = ASTScanner(verbose=args.verbose, categories=args.category)
