@@ -758,6 +758,223 @@ class PythonTaintTracker(ast.NodeVisitor):
             return node.attr
         return None
 
+    def _check_evasion_patterns(self):
+        """Check for code evasion patterns that bypass standard detection."""
+        # Run these checks after the main AST visit
+        for i, line in enumerate(self.source_lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('#'):
+                continue
+
+            # 1. Obfuscated string decoding (rot13, base64, hex)
+            if re.search(r'codecs\.decode\s*\([^,]+,\s*["\']rot.?13["\']', line):
+                self.findings.append(Finding(
+                    file_path=self.file_path, line_number=i, col_offset=0,
+                    line_content=line, vulnerability_name="Code Evasion - ROT13 string obfuscation",
+                    category=VulnCategory.CODE_INJECTION, severity=Severity.HIGH,
+                    confidence="HIGH", description="ROT13 encoding used to hide sensitive strings."
+                ))
+
+            if re.search(r'base64\.b64decode\s*\(', line) and not re.search(r'#.*base64', line):
+                # Check context for suspicious decoded content
+                self.findings.append(Finding(
+                    file_path=self.file_path, line_number=i, col_offset=0,
+                    line_content=line, vulnerability_name="Potential Evasion - base64 decode",
+                    category=VulnCategory.CODE_INJECTION, severity=Severity.MEDIUM,
+                    confidence="MEDIUM", description="base64 decoding may hide malicious strings."
+                ))
+
+            if re.search(r'bytes\.fromhex\s*\(|\.fromhex\s*\(', line):
+                self.findings.append(Finding(
+                    file_path=self.file_path, line_number=i, col_offset=0,
+                    line_content=line, vulnerability_name="Potential Evasion - hex string decode",
+                    category=VulnCategory.CODE_INJECTION, severity=Severity.MEDIUM,
+                    confidence="MEDIUM", description="Hex decoding may hide malicious strings."
+                ))
+
+            # 2. Dynamic module/attribute resolution
+            if re.search(r'__import__\s*\(', line):
+                self.findings.append(Finding(
+                    file_path=self.file_path, line_number=i, col_offset=0,
+                    line_content=line, vulnerability_name="Code Evasion - Dynamic __import__",
+                    category=VulnCategory.CODE_INJECTION, severity=Severity.HIGH,
+                    confidence="HIGH", description="__import__() enables dynamic module loading to evade detection."
+                ))
+
+            if re.search(r'getattr\s*\([^,]+,\s*[^)]*\)', line):
+                # Check if the attribute name is obfuscated
+                context = '\n'.join(self.source_lines[max(0, i-3):i+1])
+                if re.search(r'getattr.*(?:decode|b64|fromhex|r13)', context, re.IGNORECASE):
+                    self.findings.append(Finding(
+                        file_path=self.file_path, line_number=i, col_offset=0,
+                        line_content=line, vulnerability_name="Code Evasion - getattr with obfuscated name",
+                        category=VulnCategory.CODE_INJECTION, severity=Severity.HIGH,
+                        confidence="HIGH", description="getattr() with decoded/obfuscated attribute name."
+                    ))
+
+            # 3. Metaclass abuse for code execution
+            if re.search(r'metaclass\s*=', line) or re.search(r'class\s+\w+Meta\s*\(\s*type\s*\)', line):
+                # Check for __call__ or __new__ that might execute code
+                context = '\n'.join(self.source_lines[i-1:min(len(self.source_lines), i+20)])
+                if re.search(r'def\s+__call__.*eval|exec|__import__|getattr', context, re.DOTALL):
+                    self.findings.append(Finding(
+                        file_path=self.file_path, line_number=i, col_offset=0,
+                        line_content=line, vulnerability_name="Code Injection - Metaclass __call__ execution",
+                        category=VulnCategory.CODE_INJECTION, severity=Severity.CRITICAL,
+                        confidence="HIGH", description="Metaclass __call__ may execute arbitrary code."
+                    ))
+
+            # 4. Descriptor protocol abuse
+            if re.search(r'def\s+__get__\s*\(', line):
+                context = '\n'.join(self.source_lines[i-1:min(len(self.source_lines), i+15)])
+                if re.search(r'eval|exec|compile|__import__', context):
+                    self.findings.append(Finding(
+                        file_path=self.file_path, line_number=i, col_offset=0,
+                        line_content=line, vulnerability_name="Code Injection - Descriptor __get__ execution",
+                        category=VulnCategory.CODE_INJECTION, severity=Severity.CRITICAL,
+                        confidence="HIGH", description="Descriptor __get__ contains code execution."
+                    ))
+
+            # 5. functools.reduce for SQL building
+            if re.search(r'functools\.reduce\s*\(|reduce\s*\(', line):
+                context = '\n'.join(self.source_lines[max(0, i-5):i+3])
+                if re.search(r'SELECT|INSERT|UPDATE|DELETE|FROM|WHERE', context, re.IGNORECASE):
+                    self.findings.append(Finding(
+                        file_path=self.file_path, line_number=i, col_offset=0,
+                        line_content=line, vulnerability_name="SQL Injection - functools.reduce query builder",
+                        category=VulnCategory.SQL_INJECTION, severity=Severity.HIGH,
+                        confidence="HIGH", description="SQL query built via reduce() - evasion technique."
+                    ))
+
+            # 6. Generator/yield for SQL building
+            if re.search(r'yield\s+query|yield\s+sql', line, re.IGNORECASE):
+                self.findings.append(Finding(
+                    file_path=self.file_path, line_number=i, col_offset=0,
+                    line_content=line, vulnerability_name="SQL Injection - Generator-based query builder",
+                    category=VulnCategory.SQL_INJECTION, severity=Severity.HIGH,
+                    confidence="MEDIUM", description="SQL query built via generator - evasion technique."
+                ))
+
+            # 7. Context manager hiding subprocess
+            if re.search(r'@contextmanager', line):
+                context = '\n'.join(self.source_lines[i-1:min(len(self.source_lines), i+15)])
+                if re.search(r'subprocess|Popen|os\.system|shell', context, re.IGNORECASE):
+                    self.findings.append(Finding(
+                        file_path=self.file_path, line_number=i, col_offset=0,
+                        line_content=line, vulnerability_name="Command Injection - Hidden in context manager",
+                        category=VulnCategory.COMMAND_INJECTION, severity=Severity.HIGH,
+                        confidence="HIGH", description="Command execution hidden in context manager."
+                    ))
+
+            # 8. __getattr__ proxy for command building
+            if re.search(r'def\s+__getattr__\s*\(', line):
+                context = '\n'.join(self.source_lines[i-1:min(len(self.source_lines), i+15)])
+                if re.search(r'subprocess|system|popen|shell|command|cmd', context, re.IGNORECASE):
+                    self.findings.append(Finding(
+                        file_path=self.file_path, line_number=i, col_offset=0,
+                        line_content=line, vulnerability_name="Command Injection - __getattr__ shell proxy",
+                        category=VulnCategory.COMMAND_INJECTION, severity=Severity.HIGH,
+                        confidence="HIGH", description="__getattr__ proxy pattern for shell command building."
+                    ))
+
+            # 9. lxml XMLParser with dangerous options
+            if re.search(r'XMLParser\s*\(', line):
+                context = '\n'.join(self.source_lines[i-1:min(len(self.source_lines), i+3)])
+                if re.search(r'resolve_entities\s*=\s*True|load_dtd\s*=\s*True|no_network\s*=\s*False', context):
+                    self.findings.append(Finding(
+                        file_path=self.file_path, line_number=i, col_offset=0,
+                        line_content=line, vulnerability_name="XXE - lxml XMLParser with dangerous options",
+                        category=VulnCategory.XXE, severity=Severity.CRITICAL,
+                        confidence="HIGH", description="lxml XMLParser with resolve_entities/load_dtd enabled."
+                    ))
+
+            # 10. format_map SSTI
+            if re.search(r'\.format_map\s*\(', line):
+                self.findings.append(Finding(
+                    file_path=self.file_path, line_number=i, col_offset=0,
+                    line_content=line, vulnerability_name="SSTI - format_map with potential user input",
+                    category=VulnCategory.SSTI, severity=Severity.HIGH,
+                    confidence="MEDIUM", description="format_map() can lead to SSTI if template is user-controlled."
+                ))
+
+            # 11. ChainMap for dict injection
+            if re.search(r'ChainMap\s*\(', line):
+                context = '\n'.join(self.source_lines[max(0, i-3):min(len(self.source_lines), i+5)])
+                if re.search(r'__class__|__globals__|__builtins__', context):
+                    self.findings.append(Finding(
+                        file_path=self.file_path, line_number=i, col_offset=0,
+                        line_content=line, vulnerability_name="Dict Injection - ChainMap with dunder access",
+                        category=VulnCategory.CODE_INJECTION, severity=Severity.HIGH,
+                        confidence="HIGH", description="ChainMap may allow __class__ injection."
+                    ))
+
+            # 12. LDAP injection via f-string
+            if re.search(r'ldap|LDAP', line):
+                if re.search(r'f["\'].*\{.*\}|%\s*\(|\.format\s*\(', line):
+                    self.findings.append(Finding(
+                        file_path=self.file_path, line_number=i, col_offset=0,
+                        line_content=line, vulnerability_name="LDAP Injection - Dynamic LDAP filter",
+                        category=VulnCategory.LDAP_INJECTION, severity=Severity.HIGH,
+                        confidence="HIGH", description="LDAP filter with string interpolation."
+                    ))
+
+            # 13. Pickle loads with obfuscated module reference
+            if re.search(r'\.loads\s*\(', line):
+                context = '\n'.join(self.source_lines[max(0, i-5):i+1])
+                if re.search(r'pickle|cvpxyr|7069636b6c65', context):  # cvpxyr = pickle in rot13
+                    self.findings.append(Finding(
+                        file_path=self.file_path, line_number=i, col_offset=0,
+                        line_content=line, vulnerability_name="Insecure Deserialization - Obfuscated pickle",
+                        category=VulnCategory.DESERIALIZATION, severity=Severity.CRITICAL,
+                        confidence="HIGH", description="pickle.loads with potentially obfuscated reference."
+                    ))
+
+            # 14. urlopen with obfuscated reference
+            if re.search(r'\.urlopen\s*\(', line):
+                self.findings.append(Finding(
+                    file_path=self.file_path, line_number=i, col_offset=0,
+                    line_content=line, vulnerability_name="SSRF - urlopen call",
+                    category=VulnCategory.SSRF, severity=Severity.HIGH,
+                    confidence="MEDIUM", description="urlopen() may allow SSRF if URL is user-controlled."
+                ))
+
+            # 15. f-string in lambda with SQL keywords
+            if re.search(r'lambda.*f["\'].*(?:SELECT|INSERT|UPDATE|DELETE|FROM|WHERE)', line, re.IGNORECASE):
+                self.findings.append(Finding(
+                    file_path=self.file_path, line_number=i, col_offset=0,
+                    line_content=line, vulnerability_name="SQL Injection - f-string in lambda",
+                    category=VulnCategory.SQL_INJECTION, severity=Severity.HIGH,
+                    confidence="HIGH", description="SQL query with f-string interpolation in lambda."
+                ))
+
+            # 16. Dynamic SQL in f-string
+            if re.search(r'f["\'].*(?:SELECT|INSERT|UPDATE|DELETE)\s+.*\{', line, re.IGNORECASE):
+                self.findings.append(Finding(
+                    file_path=self.file_path, line_number=i, col_offset=0,
+                    line_content=line, vulnerability_name="SQL Injection - f-string query",
+                    category=VulnCategory.SQL_INJECTION, severity=Severity.HIGH,
+                    confidence="HIGH", description="SQL query built with f-string interpolation."
+                ))
+
+            # 17. Path with incomplete sanitization
+            if re.search(r"\.replace\s*\(\s*['\"]\.\./?['\"]", line):
+                self.findings.append(Finding(
+                    file_path=self.file_path, line_number=i, col_offset=0,
+                    line_content=line, vulnerability_name="Path Traversal - Incomplete ../ sanitization",
+                    category=VulnCategory.PATH_TRAVERSAL, severity=Severity.HIGH,
+                    confidence="HIGH", description="Only removes literal ../ - can be bypassed with encoding."
+                ))
+
+            # 18. NoSQL injection via dict comprehension from user input
+            if re.search(r'\{.*for.*in.*user|query|request|input', line, re.IGNORECASE):
+                if re.search(r'\.find\s*\(|\.find_one\s*\(|\.aggregate\s*\(', '\n'.join(self.source_lines[i:min(len(self.source_lines), i+5)])):
+                    self.findings.append(Finding(
+                        file_path=self.file_path, line_number=i, col_offset=0,
+                        line_content=line, vulnerability_name="NoSQL Injection - Dict from user input",
+                        category=VulnCategory.NOSQL_INJECTION, severity=Severity.HIGH,
+                        confidence="MEDIUM", description="MongoDB query built from user-controlled dict."
+                    ))
+
 
 class JavaScriptAnalyzer:
     """
@@ -812,6 +1029,12 @@ class JavaScriptAnalyzer:
         self._check_deserialization()
         self._check_ssti()
         self._check_nosql_injection()
+        self._check_path_traversal()
+        self._check_dangerous_functions()
+        self._check_callback_sinks()
+        self._check_xxe()
+        self._check_xpath_injection()
+        self._check_auth_bypass()
         return self.findings
 
     def _add_finding(self, line_num: int, vuln_name: str, category: VulnCategory,
@@ -831,78 +1054,190 @@ class JavaScriptAnalyzer:
         self.findings.append(finding)
 
     def _check_eval_injection(self):
-        """Check for eval/Function constructor injection."""
-        patterns = [
-            (r'\beval\s*\(\s*(?![\'"]\s*\))', "Code Injection - eval()"),
+        """Check for eval/Function constructor injection - including evasion techniques."""
+        # Direct patterns
+        direct_patterns = [
+            (r'\beval\s*\(', "Code Injection - eval()"),
             (r'\bnew\s+Function\s*\(', "Code Injection - Function constructor"),
-            (r'setTimeout\s*\(\s*[`"\'][^`"\']*\$\{', "Code Injection - setTimeout with template"),
-            (r'setInterval\s*\(\s*[`"\'][^`"\']*\$\{', "Code Injection - setInterval with template"),
+        ]
+
+        # Evasion technique patterns
+        evasion_patterns = [
+            # [].constructor.constructor or Array.constructor.constructor
+            (r'\[\s*\]\s*\.\s*constructor\s*\.\s*constructor', "Code Injection - Indirect Function via [].constructor.constructor"),
+            # Function.prototype.constructor
+            (r'Function\s*\.\s*prototype\s*\.\s*constructor', "Code Injection - Function.prototype.constructor"),
+            # .constructor.constructor on any object
+            (r'\.\s*constructor\s*\.\s*constructor\s*\(', "Code Injection - Indirect Function constructor chain"),
+            # .bind on Function constructor
+            (r'Function.*\.bind\s*\(', "Code Injection - Function constructor via bind"),
+            (r'constructor\s*\.\s*bind\s*\(', "Code Injection - Constructor bind evasion"),
+            # setTimeout/setInterval with string argument (not function)
+            (r'setTimeout\s*\(\s*[^,\)]+,', "Code Injection - setTimeout with potential string"),
+            (r'setInterval\s*\(\s*[^,\)]+,', "Code Injection - setInterval with potential string"),
+            # Dynamic property access to constructor
+            (r'\[\s*["\']constructor["\']\s*\]', "Code Injection - Dynamic constructor access"),
+            # Reflect.construct
+            (r'Reflect\s*\.\s*construct\s*\(', "Code Injection - Reflect.construct"),
+        ]
+
+        # vm module patterns (RCE)
+        vm_patterns = [
+            (r'vm\s*\.\s*runInContext\s*\(', "Code Injection - vm.runInContext"),
+            (r'vm\s*\.\s*runInNewContext\s*\(', "Code Injection - vm.runInNewContext"),
+            (r'vm\s*\.\s*runInThisContext\s*\(', "Code Injection - vm.runInThisContext"),
+            (r'vm\s*\.\s*compileFunction\s*\(', "Code Injection - vm.compileFunction"),
+            (r'vm\s*\.\s*createContext\s*\(', "Code Injection - vm.createContext"),
+            (r'new\s+vm\s*\.\s*Script\s*\(', "Code Injection - vm.Script constructor"),
         ]
 
         for i, line in enumerate(self.source_lines, 1):
-            # Skip comments
             stripped = line.strip()
             if stripped.startswith('//') or stripped.startswith('/*'):
                 continue
 
-            for pattern, vuln_name in patterns:
+            # Check direct patterns
+            for pattern, vuln_name in direct_patterns:
                 if re.search(pattern, line):
-                    # Check if tainted variable is used
-                    for var in self.tainted_vars:
-                        if var in line:
-                            self._add_finding(i, f"{vuln_name} with user input",
-                                              VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH",
-                                              "User-controlled data in code execution context.")
-                            break
+                    has_taint = any(var in line for var in self.tainted_vars)
+                    if has_taint:
+                        self._add_finding(i, f"{vuln_name} with user input",
+                                          VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH",
+                                          "User-controlled data in code execution context.")
                     else:
                         self._add_finding(i, vuln_name,
-                                          VulnCategory.CODE_INJECTION, Severity.MEDIUM, "MEDIUM",
+                                          VulnCategory.CODE_INJECTION, Severity.HIGH, "MEDIUM",
                                           "Potential code injection. Verify input source.")
 
+            # Check evasion patterns - these are always suspicious
+            for pattern, vuln_name in evasion_patterns:
+                if re.search(pattern, line):
+                    # Check for setTimeout/setInterval specifically - verify it's string arg
+                    if 'setTimeout' in line or 'setInterval' in line:
+                        # Look for function keyword or arrow - if present, likely safe
+                        if re.search(r'setTimeout\s*\(\s*(?:function|\()', line) or \
+                           re.search(r'setInterval\s*\(\s*(?:function|\()', line):
+                            continue
+                    self._add_finding(i, vuln_name,
+                                      VulnCategory.CODE_INJECTION, Severity.HIGH, "HIGH",
+                                      "Code execution via evasion technique detected.")
+
+            # Check vm module patterns - always critical
+            for pattern, vuln_name in vm_patterns:
+                if re.search(pattern, line):
+                    self._add_finding(i, vuln_name,
+                                      VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH",
+                                      "VM module allows arbitrary code execution.")
+
     def _check_command_injection(self):
-        """Check for command injection."""
-        patterns = [
-            r'child_process\.exec\s*\(',
-            r'child_process\.execSync\s*\(',
-            r'child_process\.spawn\s*\(',
-            r'\.exec\s*\(\s*[`"\']',
-            r'\.execSync\s*\(\s*[`"\']',
+        """Check for command injection - including evasion techniques."""
+        # Direct patterns
+        direct_patterns = [
+            (r'child_process\s*\.\s*exec\s*\(', "Command Injection - child_process.exec"),
+            (r'child_process\s*\.\s*execSync\s*\(', "Command Injection - child_process.execSync"),
+            (r'child_process\s*\.\s*execFile\s*\(', "Command Injection - child_process.execFile"),
+            (r'child_process\s*\.\s*fork\s*\(', "Command Injection - child_process.fork"),
+            (r'child_process\s*\.\s*spawnSync\s*\(', "Command Injection - child_process.spawnSync"),
+            (r'\.exec\s*\(\s*[`"\']', "Command Injection - exec call"),
+            (r'\.execSync\s*\(\s*[`"\']', "Command Injection - execSync call"),
+            (r'shelljs\s*\.\s*exec\s*\(', "Command Injection - shelljs.exec"),
+            (r'execa\s*\(', "Command Injection - execa"),
+        ]
+
+        # Evasion patterns
+        evasion_patterns = [
+            # spawn with shell: true
+            (r'spawn\s*\([^)]+shell\s*:\s*true', "Command Injection - spawn with shell:true"),
+            # Dynamic require of child_process
+            (r'require\s*\(\s*["\']child_?\s*[\+\.]', "Command Injection - Dynamic require child_process"),
+            (r"require\s*\(\s*['\"]child_['\"]", "Command Injection - Obfuscated child_process require"),
+            # Dynamic method invocation on child_process module
+            (r'\[\s*["\']exec', "Command Injection - Dynamic exec method access"),
+            (r'\[\s*[`"\']exec\w*[`"\']\s*\]', "Command Injection - Bracket notation exec"),
+            # proc.execSync or similar
+            (r'\w+\s*\.\s*execSync\s*\(', "Command Injection - execSync call"),
+            (r'\w+\s*\.\s*exec\s*\([^)]*\+', "Command Injection - exec with concatenation"),
         ]
 
         for i, line in enumerate(self.source_lines, 1):
-            for pattern in patterns:
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*'):
+                continue
+
+            # Check direct patterns
+            for pattern, vuln_name in direct_patterns:
                 if re.search(pattern, line):
-                    # Check for tainted input
                     has_taint = any(var in line for var in self.tainted_vars)
-                    has_template = '${' in line or "' +" in line or '" +' in line
+                    has_concat = '+' in line or '${' in line
 
                     if has_taint:
-                        self._add_finding(i, "Command Injection - exec with user input",
+                        self._add_finding(i, f"{vuln_name} with user input",
                                           VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, "HIGH",
                                           "User-controlled data in shell command.")
-                    elif has_template:
-                        self._add_finding(i, "Command Injection - Dynamic command",
+                    elif has_concat:
+                        self._add_finding(i, vuln_name,
                                           VulnCategory.COMMAND_INJECTION, Severity.HIGH, "MEDIUM",
                                           "Shell command with dynamic string construction.")
 
+            # Check evasion patterns
+            for pattern, vuln_name in evasion_patterns:
+                if re.search(pattern, line):
+                    self._add_finding(i, vuln_name,
+                                      VulnCategory.COMMAND_INJECTION, Severity.HIGH, "HIGH",
+                                      "Command execution via evasion technique detected.")
+
+            # Special: Check for spawn with shell option in context
+            if re.search(r'\bspawn\s*\(', line):
+                context = '\n'.join(self.source_lines[max(0, i-1):min(len(self.source_lines), i+3)])
+                if re.search(r'shell\s*:\s*true', context):
+                    self._add_finding(i, "Command Injection - spawn with shell:true",
+                                      VulnCategory.COMMAND_INJECTION, Severity.HIGH, "HIGH",
+                                      "spawn() with shell:true allows command injection.")
+
     def _check_sql_injection(self):
-        """Check for SQL injection patterns."""
-        sql_keywords = r'(?:SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE)'
+        """Check for SQL injection patterns - including evasion techniques."""
+        sql_keywords = r'(?:SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|UNION|ORDER\s+BY|GROUP\s+BY)'
 
         for i, line in enumerate(self.source_lines, 1):
-            # Check for string concatenation with SQL
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*'):
+                continue
+
+            # Direct string concatenation with SQL
             if re.search(rf'["\'][^"\']*{sql_keywords}[^"\']*["\']\s*\+', line, re.IGNORECASE):
                 self._add_finding(i, "SQL Injection - String concatenation",
                                   VulnCategory.SQL_INJECTION, Severity.HIGH, "HIGH",
                                   "SQL query uses string concatenation.")
 
-            # Check for template literals with SQL
+            # Template literals with SQL
             if re.search(rf'`[^`]*{sql_keywords}[^`]*\$\{{', line, re.IGNORECASE):
                 self._add_finding(i, "SQL Injection - Template literal",
                                   VulnCategory.SQL_INJECTION, Severity.HIGH, "HIGH",
                                   "SQL query uses template literal interpolation.")
 
-            # Check for query method with tainted variable
+            # Tagged template literals (sql`...`)
+            if re.search(rf'\bsql\s*`[^`]*{sql_keywords}', line, re.IGNORECASE):
+                self._add_finding(i, "SQL Injection - Tagged template literal",
+                                  VulnCategory.SQL_INJECTION, Severity.HIGH, "HIGH",
+                                  "SQL via tagged template may allow injection if not properly escaped.")
+
+            # Array.join() to build SQL (evasion technique)
+            if re.search(r'\.join\s*\(', line):
+                context = '\n'.join(self.source_lines[max(0, i-5):i+1])
+                if re.search(sql_keywords, context, re.IGNORECASE):
+                    self._add_finding(i, "SQL Injection - Array.join() query construction",
+                                      VulnCategory.SQL_INJECTION, Severity.HIGH, "HIGH",
+                                      "SQL query built via Array.join() - evasion technique.")
+
+            # String.concat() for SQL (evasion technique)
+            if re.search(r'\.concat\s*\(', line):
+                context = '\n'.join(self.source_lines[max(0, i-3):i+1])
+                if re.search(sql_keywords, context, re.IGNORECASE) or re.search(r'query|sql', context, re.IGNORECASE):
+                    self._add_finding(i, "SQL Injection - String.concat() query construction",
+                                      VulnCategory.SQL_INJECTION, Severity.HIGH, "HIGH",
+                                      "SQL query built via String.concat() - evasion technique.")
+
+            # Query method with tainted variable
             if re.search(r'\.query\s*\(\s*(?!["\'])', line):
                 for var in self.tainted_vars:
                     if var in line:
@@ -911,24 +1246,211 @@ class JavaScriptAnalyzer:
                                           "Query method called with variable. Use parameterized queries.")
                         break
 
+            # String reduction building SQL
+            if re.search(r'\.reduce\s*\(', line):
+                context = '\n'.join(self.source_lines[max(0, i-3):min(len(self.source_lines), i+3)])
+                if re.search(sql_keywords, context, re.IGNORECASE):
+                    self._add_finding(i, "SQL Injection - reduce() query construction",
+                                      VulnCategory.SQL_INJECTION, Severity.MEDIUM, "MEDIUM",
+                                      "SQL query potentially built via reduce().")
+
     def _check_prototype_pollution(self):
-        """Check for prototype pollution patterns."""
-        patterns = [
-            (r'\[[\s]*["\']__proto__["\'][\s]*\]', "Prototype Pollution - __proto__ access"),
-            (r'\.__proto__\s*[=\[]', "Prototype Pollution - __proto__ assignment"),
-            (r'\[[\s]*["\']constructor["\'][\s]*\]\s*\[[\s]*["\']prototype["\']', "Prototype Pollution - constructor.prototype"),
-            (r'Object\.assign\s*\([^)]*req\.body', "Prototype Pollution - Object.assign with request body"),
-            (r'\.\.\.req\.body', "Prototype Pollution - Spread operator with request body"),
-            (r'_\.merge\s*\(', "Prototype Pollution - lodash merge (check version)"),
-            (r'_\.defaultsDeep\s*\(', "Prototype Pollution - lodash defaultsDeep (check version)"),
+        """Check for prototype pollution patterns - comprehensive detection."""
+
+        # === CRITICAL: Direct __proto__ access/assignment ===
+        critical_patterns = [
+            # Direct __proto__ assignment
+            (r'\[[\s]*["\']__proto__["\'][\s]*\]\s*=', "Prototype Pollution - __proto__ Direct Assignment"),
+            (r'\.__proto__\s*=(?!=)', "Prototype Pollution - __proto__ Direct Assignment"),
+            (r'\.__proto__\.\w+\s*=', "Prototype Pollution - __proto__ Property Assignment"),
+            (r'\[[\s]*["\']__proto__["\'][\s]*\]\s*\[', "Prototype Pollution - __proto__ Nested Access"),
+            # __proto__ in object literal
+            (r'\{\s*["\']?__proto__["\']?\s*:', "Prototype Pollution - __proto__ in Object Literal"),
+            (r'__proto__\s*:\s*\{', "Prototype Pollution - __proto__ Object Definition"),
+            # JSON.parse with __proto__ in string
+            (r'JSON\.parse\s*\([^)]*__proto__', "Prototype Pollution - JSON.parse with __proto__"),
+            (r'["\']__proto__["\']\s*:\s*\{', "Prototype Pollution - __proto__ in JSON String"),
+            # constructor.prototype
+            (r'\[[\s]*["\']constructor["\'][\s]*\]\s*\[[\s]*["\']prototype["\']', "Prototype Pollution - constructor.prototype Access"),
+            (r'\.constructor\.prototype', "Prototype Pollution - constructor.prototype Access"),
+            (r'\.constructor\s*\[[\s]*["\']prototype["\']', "Prototype Pollution - constructor.prototype Access"),
         ]
 
+        # === HIGH: Unsafe merge/extend operations ===
+        high_patterns = [
+            # Lodash vulnerable functions
+            (r'_\.merge\s*\(', "Prototype Pollution - lodash _.merge (vulnerable < 4.17.12)"),
+            (r'_\.mergeWith\s*\(', "Prototype Pollution - lodash _.mergeWith"),
+            (r'_\.defaultsDeep\s*\(', "Prototype Pollution - lodash _.defaultsDeep"),
+            (r'_\.set\s*\([^,]+,\s*req\.', "Prototype Pollution - lodash _.set with user path"),
+            (r'_\.setWith\s*\(', "Prototype Pollution - lodash _.setWith"),
+            # jQuery extend
+            (r'\$\.extend\s*\(\s*true', "Prototype Pollution - jQuery deep extend"),
+            (r'jQuery\.extend\s*\(\s*true', "Prototype Pollution - jQuery deep extend"),
+            # Spread with user input
+            (r'\.\.\.req\.(body|query|params)', "Prototype Pollution - Spread with user input"),
+            (r'\.\.\.\s*JSON\.parse', "Prototype Pollution - Spread with JSON.parse"),
+            # Object.assign with user input
+            (r'Object\.assign\s*\([^)]*req\.(body|query|params)', "Prototype Pollution - Object.assign with user input"),
+            (r'Object\.assign\s*\([^)]*JSON\.parse', "Prototype Pollution - Object.assign with JSON.parse"),
+            # Deep merge packages
+            (r'deepmerge\s*\(', "Prototype Pollution - deepmerge package"),
+            (r'merge\-deep\s*\(', "Prototype Pollution - merge-deep package"),
+            (r'deep\-extend\s*\(', "Prototype Pollution - deep-extend package"),
+            (r'extend\s*\(\s*true', "Prototype Pollution - extend with deep flag"),
+            # Evasion: Reflect.ownKeys with dynamic assignment
+            (r'Reflect\s*\.\s*ownKeys\s*\(', "Prototype Pollution - Reflect.ownKeys iteration"),
+            # Evasion: Object.getOwnPropertyDescriptor without filtering
+            (r'Object\s*\.\s*getOwnPropertyDescriptor\s*\(', "Prototype Pollution - getOwnPropertyDescriptor"),
+            # Evasion: Object.defineProperty with user data
+            (r'Object\s*\.\s*defineProperty\s*\([^)]+\[\s*\w+\s*\]', "Prototype Pollution - defineProperty with dynamic key"),
+            # Evasion: path-based set function
+            (r'setByPath\s*\(|set\s*\(\s*\w+\s*,\s*["\'][^"\']*\.[^"\']*["\']', "Prototype Pollution - Path-based property setter"),
+            # Evasion: split('.') for path traversal
+            (r'\.split\s*\(\s*["\']\.["\']\s*\)', "Prototype Pollution - Path splitting for nested access"),
+        ]
+
+        # === MEDIUM: Unsafe custom implementations ===
+        # Patterns that indicate custom merge without __proto__ filtering
+        medium_patterns = [
+            # for...in without hasOwnProperty
+            (r'for\s*\(\s*(?:const|let|var)\s+\w+\s+in\s+', "Prototype Pollution - Unsafe Object Manipulation"),
+            # Object.keys iteration with dynamic assignment
+            (r'Object\.keys\s*\([^)]+\)\.forEach', "Prototype Pollution - Object.keys iteration"),
+            (r'Object\.entries\s*\([^)]+\)\.forEach', "Prototype Pollution - Object.entries iteration"),
+        ]
+
+        # Track findings to avoid duplicates
+        found_lines = set()
+
         for i, line in enumerate(self.source_lines, 1):
-            for pattern, vuln_name in patterns:
-                if re.search(pattern, line):
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*'):
+                continue
+
+            # Check critical patterns
+            for pattern, vuln_name in critical_patterns:
+                if re.search(pattern, line) and i not in found_lines:
                     self._add_finding(i, vuln_name,
-                                      VulnCategory.PROTOTYPE_POLLUTION, Severity.HIGH, "MEDIUM",
-                                      "Potential prototype pollution vulnerability.")
+                                      VulnCategory.PROTOTYPE_POLLUTION, Severity.CRITICAL, "HIGH",
+                                      "Direct prototype pollution vector detected.")
+                    found_lines.add(i)
+                    break
+
+            # Check high severity patterns
+            for pattern, vuln_name in high_patterns:
+                if re.search(pattern, line) and i not in found_lines:
+                    self._add_finding(i, vuln_name,
+                                      VulnCategory.PROTOTYPE_POLLUTION, Severity.HIGH, "HIGH",
+                                      "Unsafe object manipulation that may allow prototype pollution.")
+                    found_lines.add(i)
+                    break
+
+            # Check medium patterns (require context)
+            for pattern, vuln_name in medium_patterns:
+                if re.search(pattern, line) and i not in found_lines:
+                    # Look for dynamic property assignment in surrounding context
+                    context_start = max(0, i - 2)
+                    context_end = min(len(self.source_lines), i + 10)
+                    context = '\n'.join(self.source_lines[context_start:context_end])
+
+                    # Check if there's dynamic property assignment
+                    has_dynamic_assign = re.search(r'\[\s*\w+\s*\]\s*=', context)
+
+                    # Check for proper __proto__ filtering (not just mention in comments)
+                    has_proto_filter = re.search(
+                        r'(?:hasOwnProperty|===\s*["\']__proto__|!==\s*["\']__proto__|'
+                        r'key\s*(?:===|!==)\s*["\']__proto__|'
+                        r'if\s*\([^)]*__proto__[^)]*\)\s*continue)',
+                        context
+                    )
+
+                    if has_dynamic_assign and not has_proto_filter:
+                        self._add_finding(i, vuln_name,
+                                          VulnCategory.PROTOTYPE_POLLUTION, Severity.HIGH, "MEDIUM",
+                                          "Object iteration with dynamic assignment without __proto__ filtering.")
+                        found_lines.add(i)
+
+        # Check for unsafe merge/extend function definitions
+        self._check_unsafe_merge_functions()
+
+    def _check_unsafe_merge_functions(self):
+        """Detect custom merge/extend functions that lack __proto__ protection."""
+        # Find function definitions with dangerous names
+        merge_func_def_pattern = re.compile(
+            r'function\s+(deepMerge|merge|extend|deepExtend|mergeDeep|recursiveMerge|'
+            r'deepAssign|clone|deepClone|copy|deepCopy)\s*\(',
+            re.IGNORECASE
+        )
+
+        # Find function calls with potentially unsafe input
+        merge_func_call_pattern = re.compile(
+            r'(deepMerge|merge|extend|deepExtend|mergeDeep|recursiveMerge|'
+            r'deepAssign|clone|deepClone|copy|deepCopy)\s*\(\s*([^)]+)\)',
+            re.IGNORECASE
+        )
+
+        for i, line in enumerate(self.source_lines, 1):
+            # Check function definitions
+            def_match = merge_func_def_pattern.search(line)
+            if def_match:
+                func_name = def_match.group(1)
+                # Find function body by counting braces
+                brace_count = line.count('{') - line.count('}')
+                body_lines = [line]
+                body_end = i
+
+                for j in range(i, min(len(self.source_lines), i + 25)):
+                    if j > i - 1:
+                        next_line = self.source_lines[j]
+                        brace_count += next_line.count('{') - next_line.count('}')
+                        body_lines.append(next_line)
+                        if brace_count <= 0:
+                            body_end = j + 1
+                            break
+
+                body = '\n'.join(body_lines)
+
+                # Check if it has for...in and dynamic assignment
+                has_for_in = re.search(r'for\s*\(\s*(?:const|let|var)\s+\w+\s+in', body)
+                has_dynamic_assign = re.search(r'\[\s*\w+\s*\]\s*=', body)
+
+                # Check for actual __proto__ protection (filtering, not just usage)
+                has_proto_filter = re.search(
+                    r'hasOwnProperty|'
+                    r'(?:key|prop|k)\s*(?:===|!==|==|!=)\s*["\'](?:__proto__|constructor)["\']|'
+                    r'if\s*\([^)]*["\']__proto__["\'][^)]*\)\s*(?:continue|return)',
+                    body
+                )
+
+                if has_for_in and has_dynamic_assign and not has_proto_filter:
+                    self._add_finding(i, f"Prototype Pollution - Unsafe {func_name} function",
+                                      VulnCategory.PROTOTYPE_POLLUTION, Severity.HIGH, "HIGH",
+                                      f"Custom {func_name} function lacks __proto__/constructor filtering.")
+
+            # Check function calls with untrusted input
+            call_match = merge_func_call_pattern.search(line)
+            if call_match and not def_match:  # Not a definition
+                func_name = call_match.group(1)
+                args = call_match.group(2)
+
+                # Check if any argument is from untrusted source
+                has_json_parse = 'JSON.parse' in line or re.search(r'JSON\.parse', args)
+                has_req_input = re.search(r'req\.(body|query|params)', args)
+                has_untrusted = re.search(r'untrusted|userInput|user_input|input|data', args, re.IGNORECASE)
+
+                # Also check context for where the args come from
+                context = '\n'.join(self.source_lines[max(0, i-5):i])
+                args_tainted = any(
+                    re.search(rf'\b{re.escape(arg.strip())}\b.*(?:JSON\.parse|req\.|untrusted|input)',
+                              context, re.IGNORECASE)
+                    for arg in args.split(',')
+                )
+
+                if has_json_parse or has_req_input or has_untrusted or args_tainted:
+                    self._add_finding(i, f"Prototype Pollution - {func_name} with untrusted input",
+                                      VulnCategory.PROTOTYPE_POLLUTION, Severity.HIGH, "HIGH",
+                                      f"Merge function called with potentially untrusted data.")
 
     def _check_ssrf(self):
         """Check for SSRF patterns."""
@@ -957,50 +1479,452 @@ class JavaScriptAnalyzer:
                                           "HTTP request with dynamic URL construction.")
 
     def _check_deserialization(self):
-        """Check for deserialization vulnerabilities."""
-        patterns = [
-            (r'serialize\.unserialize\s*\(', "Insecure Deserialization - node-serialize"),
+        """Check for deserialization vulnerabilities - including evasion techniques."""
+        critical_patterns = [
+            # node-serialize (known RCE)
+            (r'serialize\.unserialize\s*\(', "Insecure Deserialization - node-serialize.unserialize"),
             (r'require\s*\(\s*["\']node-serialize["\']', "Insecure Deserialization - node-serialize import"),
+            (r'\.unserialize\s*\(', "Insecure Deserialization - unserialize call"),
+        ]
+
+        high_patterns = [
+            # js-yaml unsafe load
+            (r'yaml\s*\.\s*load\s*\(', "Insecure Deserialization - yaml.load (use safeLoad)"),
+            (r'yaml\s*\.\s*loadAll\s*\(', "Insecure Deserialization - yaml.loadAll"),
+            (r'DEFAULT_FULL_SCHEMA|DEFAULT_SCHEMA', "Insecure Deserialization - yaml unsafe schema"),
+            (r'js-yaml.*(?:load|loadAll)\s*\(', "Insecure Deserialization - js-yaml load"),
+            # Other deserializers
+            (r'jsonwebtoken.*\.decode\s*\(', "Insecure Deserialization - JWT decode without verify"),
+            (r'flatted\s*\.\s*parse\s*\(', "Insecure Deserialization - flatted.parse"),
+            (r'v8\s*\.\s*deserialize\s*\(', "Insecure Deserialization - v8.deserialize"),
+            (r'BSON\s*\.\s*deserialize\s*\(', "Insecure Deserialization - BSON.deserialize"),
         ]
 
         for i, line in enumerate(self.source_lines, 1):
-            for pattern, vuln_name in patterns:
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*'):
+                continue
+
+            for pattern, vuln_name in critical_patterns:
                 if re.search(pattern, line):
                     self._add_finding(i, vuln_name,
                                       VulnCategory.DESERIALIZATION, Severity.CRITICAL, "HIGH",
-                                      "node-serialize is vulnerable to RCE.")
+                                      "Known vulnerable deserialization - RCE possible.")
+
+            for pattern, vuln_name in high_patterns:
+                if re.search(pattern, line):
+                    self._add_finding(i, vuln_name,
+                                      VulnCategory.DESERIALIZATION, Severity.HIGH, "HIGH",
+                                      "Unsafe deserialization detected.")
 
     def _check_ssti(self):
-        """Check for SSTI patterns."""
-        patterns = [
-            (r'ejs\.render\s*\(\s*req\.', "SSTI - EJS render with request data"),
-            (r'pug\.render\s*\(\s*req\.', "SSTI - Pug render with request data"),
-            (r'handlebars\.compile\s*\(\s*req\.', "SSTI - Handlebars with request data"),
-            (r'nunjucks\.renderString\s*\(\s*req\.', "SSTI - Nunjucks with request data"),
+        """Check for SSTI patterns - including evasion techniques."""
+        # Patterns where template source is user-controlled
+        critical_patterns = [
+            # EJS
+            (r'ejs\s*\.\s*render\s*\(\s*(?!.*["\'])', "SSTI - EJS render with variable template"),
+            (r'ejs\s*\.\s*compile\s*\(\s*(?!.*["\'])', "SSTI - EJS compile with variable"),
+            # Pug/Jade
+            (r'pug\s*\.\s*render\s*\(\s*(?!.*["\'])', "SSTI - Pug render with variable"),
+            (r'pug\s*\.\s*compile\s*\(\s*(?!.*["\'])', "SSTI - Pug compile with variable"),
+            (r'jade\s*\.\s*render\s*\(', "SSTI - Jade render"),
+            # Handlebars
+            (r'handlebars\s*\.\s*compile\s*\(\s*(?!.*["\'])', "SSTI - Handlebars compile with variable"),
+            (r'Handlebars\s*\.\s*compile\s*\(', "SSTI - Handlebars.compile"),
+            # Nunjucks
+            (r'nunjucks\s*\.\s*renderString\s*\(', "SSTI - Nunjucks renderString"),
+            (r'nunjucks\s*\.\s*compile\s*\(', "SSTI - Nunjucks compile"),
+            # Mustache
+            (r'Mustache\s*\.\s*render\s*\(\s*(?!.*["\'])', "SSTI - Mustache render with variable"),
+            # doT
+            (r'doT\s*\.\s*template\s*\(', "SSTI - doT.template"),
+            # Generic
+            (r'\.render\s*\(\s*(?:req\.|user|input|template)', "SSTI - render with user input"),
+            (r'\.compile\s*\(\s*(?:req\.|user|input|template)', "SSTI - compile with user input"),
         ]
 
         for i, line in enumerate(self.source_lines, 1):
-            for pattern, vuln_name in patterns:
-                if re.search(pattern, line):
-                    self._add_finding(i, vuln_name,
-                                      VulnCategory.SSTI, Severity.CRITICAL, "HIGH",
-                                      "Template engine rendering user-controlled string.")
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*'):
+                continue
+
+            for pattern, vuln_name in critical_patterns:
+                if re.search(pattern, line, re.IGNORECASE):
+                    # Check if this is with user-controlled template
+                    has_param = bool(self.tainted_vars & set(line.split()))
+                    has_req = 'req.' in line or 'request.' in line
+
+                    if has_param or has_req:
+                        self._add_finding(i, f"{vuln_name} with user input",
+                                          VulnCategory.SSTI, Severity.CRITICAL, "HIGH",
+                                          "Template engine rendering user-controlled template - RCE possible.")
+                    else:
+                        self._add_finding(i, vuln_name,
+                                          VulnCategory.SSTI, Severity.HIGH, "MEDIUM",
+                                          "Template compilation/rendering with variable. Verify source.")
 
     def _check_nosql_injection(self):
-        """Check for NoSQL injection patterns."""
+        """Check for NoSQL injection patterns - including evasion techniques."""
         patterns = [
             (r'\.find\s*\(\s*\{[^}]*:\s*req\.', "NoSQL Injection - MongoDB find with request"),
             (r'\.findOne\s*\(\s*\{[^}]*:\s*req\.', "NoSQL Injection - MongoDB findOne with request"),
             (r'\$where\s*:', "NoSQL Injection - $where operator"),
             (r'\$regex\s*:\s*req\.', "NoSQL Injection - $regex with request data"),
+            # Evasion: Dynamic object key from user input
+            (r'query\s*\[\s*\w+\s*\]\s*=', "NoSQL Injection - Dynamic query key assignment"),
+            (r'\[\s*field\s*\]\s*=|\[\s*operator\s*\]\s*=', "NoSQL Injection - Dynamic field/operator"),
+            # MongoDB operators
+            (r'\$(?:gt|gte|lt|lte|ne|in|nin|or|and|not|nor|exists|type|regex)\s*:', "NoSQL Injection - MongoDB operator"),
         ]
 
         for i, line in enumerate(self.source_lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*'):
+                continue
+
             for pattern, vuln_name in patterns:
                 if re.search(pattern, line):
+                    # Check context for query building
+                    context = '\n'.join(self.source_lines[max(0, i-3):min(len(self.source_lines), i+2)])
+                    has_query_context = re.search(r'query|find|collection|\.db\.|mongo', context, re.IGNORECASE)
+
+                    if has_query_context or 'query' in line.lower():
+                        self._add_finding(i, vuln_name,
+                                          VulnCategory.NOSQL_INJECTION, Severity.HIGH, "HIGH",
+                                          "Potential NoSQL injection vulnerability.")
+
+    def _check_path_traversal(self):
+        """Check for path traversal vulnerabilities - including evasion techniques."""
+        # File system operations that could be exploited
+        fs_patterns = [
+            (r'fs\.readFile(?:Sync)?\s*\(', 'readFile'),
+            (r'fs\.writeFile(?:Sync)?\s*\(', 'writeFile'),
+            (r'fs\.unlink(?:Sync)?\s*\(', 'unlink'),
+            (r'fs\.rmdir(?:Sync)?\s*\(', 'rmdir'),
+            (r'fs\.rm(?:Sync)?\s*\(', 'rm'),
+            (r'fs\.mkdir(?:Sync)?\s*\(', 'mkdir'),
+            (r'fs\.readdir(?:Sync)?\s*\(', 'readdir'),
+            (r'fs\.stat(?:Sync)?\s*\(', 'stat'),
+            (r'fs\.access(?:Sync)?\s*\(', 'access'),
+            (r'fs\.createReadStream\s*\(', 'createReadStream'),
+            (r'fs\.createWriteStream\s*\(', 'createWriteStream'),
+            (r'fs\.copyFile(?:Sync)?\s*\(', 'copyFile'),
+            (r'fs\.rename(?:Sync)?\s*\(', 'rename'),
+            (r'path\.join\s*\(', 'path.join'),
+            (r'path\.resolve\s*\(', 'path.resolve'),
+            (r'require\s*\(\s*(?!["\'])', 'require'),
+        ]
+
+        for i, line in enumerate(self.source_lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*'):
+                continue
+
+            for pattern, op_name in fs_patterns:
+                if re.search(pattern, line):
+                    # Check for user input
+                    has_taint = any(var in line for var in self.tainted_vars)
+                    has_req_input = re.search(r'req\.(body|query|params|path)', line)
+                    has_template = '${' in line or "' +" in line or '" +' in line
+
+                    if has_taint or has_req_input:
+                        self._add_finding(i, f"Path Traversal - {op_name} with user input",
+                                          VulnCategory.PATH_TRAVERSAL, Severity.HIGH, "HIGH",
+                                          "User-controlled path in file system operation.")
+                    elif has_template:
+                        # Look for path sanitization in context
+                        context = '\n'.join(self.source_lines[max(0, i-3):i])
+                        has_sanitize = re.search(r'sanitize|normalize|basename|\.replace\s*\([^)]*\.\.', context)
+                        if not has_sanitize:
+                            self._add_finding(i, f"Path Traversal - {op_name} with dynamic path",
+                                              VulnCategory.PATH_TRAVERSAL, Severity.MEDIUM, "MEDIUM",
+                                              "Dynamic path construction without apparent sanitization.")
+
+            # Evasion: Incomplete ../ sanitization (only removes literal ../)
+            if re.search(r'\.replace\s*\(\s*/\\\.\\\.\\//g', line) or \
+               re.search(r'\.replace\s*\(\s*["\']\.\./', line):
+                # Check if it's the ONLY sanitization
+                context = '\n'.join(self.source_lines[max(0, i-2):min(len(self.source_lines), i+3)])
+                has_decode = re.search(r'decodeURI|unescape|%2e|%2f', context, re.IGNORECASE)
+                has_normalize = re.search(r'path\.normalize|realpath', context)
+                if not has_decode and not has_normalize:
+                    self._add_finding(i, "Path Traversal - Incomplete ../ sanitization",
+                                      VulnCategory.PATH_TRAVERSAL, Severity.HIGH, "HIGH",
+                                      "Sanitization only removes literal ../ - can be bypassed with encoding.")
+
+            # Evasion: path.resolve without containment check
+            if re.search(r'path\.resolve\s*\(', line):
+                # Check if result is validated to be within base path
+                context = '\n'.join(self.source_lines[i-1:min(len(self.source_lines), i+5)])
+                has_containment = re.search(r'startsWith|indexOf.*===\s*0|includes\s*\(|\.resolve.*\.resolve', context)
+                if not has_containment:
+                    self._add_finding(i, "Path Traversal - path.resolve without containment",
+                                      VulnCategory.PATH_TRAVERSAL, Severity.MEDIUM, "MEDIUM",
+                                      "path.resolve() without validating result stays within base directory.")
+
+    def _check_dangerous_functions(self):
+        """Check for dangerous functions that could lead to RCE."""
+        # RCE vectors
+        rce_patterns = [
+            # vm module
+            (r'vm\.runInContext\s*\(', "RCE - vm.runInContext", Severity.CRITICAL),
+            (r'vm\.runInNewContext\s*\(', "RCE - vm.runInNewContext", Severity.CRITICAL),
+            (r'vm\.runInThisContext\s*\(', "RCE - vm.runInThisContext", Severity.CRITICAL),
+            (r'vm\.compileFunction\s*\(', "RCE - vm.compileFunction", Severity.HIGH),
+            (r'new\s+vm\.Script\s*\(', "RCE - vm.Script constructor", Severity.HIGH),
+            # Process spawn variants
+            (r'child_process\.fork\s*\(', "RCE - child_process.fork", Severity.HIGH),
+            (r'child_process\.execFile\s*\(', "RCE - child_process.execFile", Severity.HIGH),
+            (r'child_process\.spawnSync\s*\(', "RCE - child_process.spawnSync", Severity.HIGH),
+            # Worker threads
+            (r'new\s+Worker\s*\(', "RCE - Worker thread", Severity.MEDIUM),
+            # Shell execution
+            (r'shelljs\.exec\s*\(', "RCE - shelljs.exec", Severity.HIGH),
+            (r'execa\s*\(', "RCE - execa", Severity.MEDIUM),
+            # Require with variable
+            (r'require\s*\(\s*[^"\'\s]', "RCE - Dynamic require", Severity.HIGH),
+            # Import with variable
+            (r'import\s*\(\s*[^"\'\s]', "RCE - Dynamic import", Severity.HIGH),
+            # Prototype access for gadget chains
+            (r'Function\s*\(\s*["\']return\s+this', "RCE - Function constructor sandbox escape", Severity.CRITICAL),
+        ]
+
+        for i, line in enumerate(self.source_lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*'):
+                continue
+
+            for pattern, vuln_name, severity in rce_patterns:
+                if re.search(pattern, line):
+                    has_taint = any(var in line for var in self.tainted_vars)
+                    has_req = 'req.' in line or 'request.' in line
+                    has_dynamic = '${' in line or '+' in line
+
+                    if has_taint or has_req:
+                        self._add_finding(i, f"{vuln_name} with user input",
+                                          VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH",
+                                          "User-controlled data in code execution context.")
+                    elif has_dynamic:
+                        self._add_finding(i, vuln_name,
+                                          VulnCategory.CODE_INJECTION, severity, "MEDIUM",
+                                          "Dynamic code execution detected. Verify input source.")
+
+    def _check_callback_sinks(self):
+        """Check for vulnerabilities in callback/arrow function patterns."""
+        # Track arrow functions and callbacks that contain sinks
+        callback_sink_patterns = [
+            # Arrow functions with dangerous operations
+            (r'=>\s*\{[^}]*(?:exec|eval|Function)\s*\(', "Callback with code execution"),
+            (r'=>\s*\{[^}]*fs\.\w+\s*\(', "Callback with file operation"),
+            (r'=>\s*\{[^}]*child_process', "Callback with child_process"),
+            # forEach/map/filter with dangerous operations
+            (r'\.forEach\s*\([^)]*=>\s*\{[^}]*(?:exec|eval)', "forEach callback with code execution"),
+            (r'\.map\s*\([^)]*=>\s*\{[^}]*(?:exec|eval)', "map callback with code execution"),
+            # Promise handlers with sinks
+            (r'\.then\s*\([^)]*=>\s*\{[^}]*(?:exec|eval|unserialize)', "Promise handler with dangerous operation"),
+            (r'\.catch\s*\([^)]*=>\s*\{[^}]*(?:exec|eval)', "Error handler with code execution"),
+        ]
+
+        for i, line in enumerate(self.source_lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*'):
+                continue
+
+            for pattern, vuln_name in callback_sink_patterns:
+                if re.search(pattern, line, re.IGNORECASE):
+                    # Check broader context for taint flow
+                    context_start = max(0, i - 5)
+                    context = '\n'.join(self.source_lines[context_start:i + 3])
+
+                    has_taint = any(var in context for var in self.tainted_vars)
+                    has_req = re.search(r'req\.(body|query|params)', context)
+
+                    if has_taint or has_req:
+                        self._add_finding(i, f"Tainted {vuln_name}",
+                                          VulnCategory.CODE_INJECTION, Severity.HIGH, "MEDIUM",
+                                          "User input may flow into callback containing dangerous operation.")
+
+    def _check_xxe(self):
+        """Check for XXE vulnerabilities in JavaScript XML parsing - including evasion techniques."""
+        # Critical: Known vulnerable configurations
+        critical_patterns = [
+            # libxmljs with dangerous options explicitly enabled
+            (r'libxml.*\{[^}]*noent\s*:\s*true', "XXE - libxmljs with noent:true"),
+            (r'libxml.*\{[^}]*dtdload\s*:\s*true', "XXE - libxmljs with dtdload:true"),
+            # xmldom with external resolution
+            (r'DOMParser\s*\(\s*\{[^}]*resolveExternals\s*:\s*true', "XXE - xmldom resolveExternals enabled"),
+            (r'DOMParser\s*\(\s*\{[^}]*loadExternalSubset\s*:\s*true', "XXE - xmldom loadExternalSubset enabled"),
+            # fast-xml-parser with DTD
+            (r'XMLParser\s*\(\s*\{[^}]*allowDtd\s*:\s*true', "XXE - XMLParser allowDtd enabled"),
+            (r'XMLParser\s*\(\s*\{[^}]*processEntities\s*:\s*true', "XXE - XMLParser processEntities enabled"),
+        ]
+
+        # High: Potentially vulnerable parsers
+        high_patterns = [
+            # libxmljs (needs secure config)
+            (r'libxml(?:js)?\s*\.\s*parseXml(?:String)?\s*\(', "XXE - libxmljs.parseXml"),
+            # xmldom
+            (r'new\s+(?:xmldom\s*\.\s*)?DOMParser\s*\(', "XXE - xmldom DOMParser"),
+            # xml2js
+            (r'xml2js\s*\.\s*parseString\s*\(', "XXE - xml2js.parseString"),
+            (r'new\s+xml2js\s*\.\s*Parser\s*\(', "XXE - xml2js.Parser"),
+            # sax parser
+            (r'sax\s*\.\s*parser\s*\(', "XXE - sax parser"),
+            # Generic DOMParser
+            (r'new\s+DOMParser\s*\(\s*\)', "XXE - DOMParser"),
+            (r'\.parseFromString\s*\([^,]+,\s*["\'](?:text|application)/xml', "XXE - parseFromString"),
+        ]
+
+        for i, line in enumerate(self.source_lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*'):
+                continue
+
+            # Check critical patterns - explicit dangerous config
+            for pattern, vuln_name in critical_patterns:
+                if re.search(pattern, line):
                     self._add_finding(i, vuln_name,
-                                      VulnCategory.NOSQL_INJECTION, Severity.HIGH, "HIGH",
-                                      "Potential NoSQL injection vulnerability.")
+                                      VulnCategory.XXE, Severity.CRITICAL, "HIGH",
+                                      "XML parser explicitly configured with dangerous options - XXE likely.")
+
+            # Check high patterns
+            for pattern, vuln_name in high_patterns:
+                if re.search(pattern, line):
+                    # Check context for dangerous options
+                    context = '\n'.join(self.source_lines[max(0, i-2):min(len(self.source_lines), i+5)])
+
+                    # Look for dangerous options
+                    has_dangerous = re.search(
+                        r'noent\s*:\s*true|dtdload\s*:\s*true|dtdvalid\s*:\s*true|'
+                        r'resolveExternals\s*:\s*true|loadExternalSubset\s*:\s*true|'
+                        r'allowDtd\s*:\s*true|processEntities\s*:\s*true',
+                        context
+                    )
+
+                    # Look for secure options
+                    has_secure = re.search(
+                        r'noent\s*:\s*false|dtdload\s*:\s*false|'
+                        r'resolveExternals\s*:\s*false|allowDtd\s*:\s*false',
+                        context
+                    )
+
+                    if has_dangerous:
+                        self._add_finding(i, f"{vuln_name} with dangerous options",
+                                          VulnCategory.XXE, Severity.HIGH, "HIGH",
+                                          "XML parser with external entity processing enabled.")
+                    elif not has_secure:
+                        self._add_finding(i, vuln_name,
+                                          VulnCategory.XXE, Severity.MEDIUM, "MEDIUM",
+                                          "XML parser without explicit secure configuration.")
+
+    def _check_xpath_injection(self):
+        """Check for XPath injection vulnerabilities."""
+        xpath_patterns = [
+            # xpath package
+            (r'xpath\.select\s*\(', "XPath Injection - xpath.select"),
+            (r'xpath\.evaluate\s*\(', "XPath Injection - xpath.evaluate"),
+            # xmldom with xpath
+            (r'\.evaluate\s*\(\s*[`"\'][^`"\']*\$\{', "XPath Injection - evaluate with template"),
+            (r'\.selectNodes\s*\(', "XPath Injection - selectNodes"),
+            (r'\.selectSingleNode\s*\(', "XPath Injection - selectSingleNode"),
+            # libxmljs .find() method for XPath
+            (r'\.find\s*\(\s*xpath', "XPath Injection - libxmljs find"),
+            (r'xmlDoc\.find\s*\(', "XPath Injection - xmlDoc.find"),
+            # Generic XPath construction
+            (r'["\'][^"\']*//[^"\']*["\']\s*\+', "XPath Injection - XPath concatenation"),
+        ]
+
+        for i, line in enumerate(self.source_lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*'):
+                continue
+
+            for pattern, vuln_name in xpath_patterns:
+                if re.search(pattern, line):
+                    has_taint = any(var in line for var in self.tainted_vars)
+                    has_req = 'req.' in line
+
+                    if has_taint or has_req:
+                        self._add_finding(i, f"{vuln_name} with user input",
+                                          VulnCategory.XPATH_INJECTION, Severity.HIGH, "HIGH",
+                                          "User input in XPath query may allow injection.")
+                    elif '${' in line or '+' in line:
+                        self._add_finding(i, vuln_name,
+                                          VulnCategory.XPATH_INJECTION, Severity.MEDIUM, "MEDIUM",
+                                          "Dynamic XPath construction detected.")
+
+            # Detect XPath string construction with concatenation (common evasion)
+            # Pattern: variable = "...//..." + userInput + "..."
+            if re.search(r'=\s*["\'][^"\']*//[^"\']*["\'].*\+', line) or \
+               re.search(r'\+\s*["\'][^"\']*//[^"\']*["\']', line):
+                self._add_finding(i, "XPath Injection - XPath string concatenation",
+                                  VulnCategory.XPATH_INJECTION, Severity.HIGH, "HIGH",
+                                  "XPath query constructed via string concatenation.")
+
+    def _check_auth_bypass(self):
+        """Check for authentication bypass vulnerabilities - including evasion techniques."""
+        critical_patterns = [
+            # JWT issues
+            (r'jwt\.verify\s*\([^)]*\{\s*algorithms\s*:\s*\[.*none', "Auth Bypass - JWT none algorithm"),
+            (r'algorithms\s*:\s*\[\s*["\'](?:HS|RS|ES)\d+["\'].*["\']none["\']', "Auth Bypass - JWT allows none"),
+            # Direct bypass
+            (r'isAdmin\s*=\s*true\b', "Auth Bypass - Direct admin assignment"),
+            (r'\.isAuthenticated\s*=\s*true', "Auth Bypass - Direct authentication bypass"),
+            (r'authenticated\s*=\s*true\b', "Auth Bypass - Direct auth flag set"),
+        ]
+
+        high_patterns = [
+            # JWT decode without verify (evasion: extract payload manually)
+            (r'jwt\.decode\s*\(', "Auth Bypass - jwt.decode without verify"),
+            (r'\.split\s*\(\s*["\']\.["\']\s*\).*\[\s*1\s*\]', "Auth Bypass - Manual JWT payload extraction"),
+            (r'atob\s*\(.*\.split', "Auth Bypass - Base64 decode JWT segment"),
+            (r'Buffer\.from\s*\([^,]+,\s*["\']base64', "Auth Bypass - Buffer JWT decode"),
+            # Loose comparison (== instead of ===)
+            (r'(?:password|token|secret|apiKey|api_key)\s*==\s*[^=]', "Auth Bypass - Loose comparison (use ===)"),
+            (r'provided\s*==\s*expected', "Auth Bypass - Loose comparison"),
+            (r'==\s*(?:password|token|secret)', "Auth Bypass - Loose comparison"),
+            # Hardcoded credentials
+            (r'password\s*===?\s*["\'][^"\']+["\']', "Auth Bypass - Hardcoded password"),
+            (r'===?\s*["\'](?:admin|root|administrator)["\']', "Auth Bypass - Hardcoded role check"),
+            # Session manipulation
+            (r'req\.session\s*=\s*\{', "Auth Bypass - Direct session assignment"),
+            (r'session\s*\[\s*["\'](?:admin|role|user)', "Auth Bypass - Session role manipulation"),
+            # Insecure cookie settings
+            (r'httpOnly\s*:\s*false', "Auth Bypass - Cookie without httpOnly"),
+            (r'secure\s*:\s*false', "Auth Bypass - Cookie without secure flag"),
+            (r'sameSite\s*:\s*["\']none["\']', "Auth Bypass - Cookie SameSite none"),
+        ]
+
+        medium_patterns = [
+            # Timing-vulnerable comparisons
+            (r'===\s*(?:password|secret|token|key|apiKey)\b', "Auth Bypass - Potential timing attack"),
+            # Bypassable validation
+            (r'\.endsWith\s*\(\s*["\']\.internal', "Auth Bypass - Bypassable domain validation"),
+            (r'\.includes\s*\(\s*["\'](?:admin|internal)', "Auth Bypass - Weak authorization check"),
+        ]
+
+        for i, line in enumerate(self.source_lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*'):
+                continue
+
+            for pattern, vuln_name in critical_patterns:
+                if re.search(pattern, line, re.IGNORECASE):
+                    self._add_finding(i, vuln_name,
+                                      VulnCategory.AUTH_BYPASS, Severity.CRITICAL, "HIGH",
+                                      "Critical authentication bypass vulnerability.")
+
+            for pattern, vuln_name in high_patterns:
+                if re.search(pattern, line, re.IGNORECASE):
+                    self._add_finding(i, vuln_name,
+                                      VulnCategory.AUTH_BYPASS, Severity.HIGH, "HIGH",
+                                      "Authentication or authorization bypass detected.")
+
+            for pattern, vuln_name in medium_patterns:
+                if re.search(pattern, line, re.IGNORECASE):
+                    self._add_finding(i, vuln_name,
+                                      VulnCategory.AUTH_BYPASS, Severity.MEDIUM, "MEDIUM",
+                                      "Potential authentication weakness.")
 
 
 class JavaAnalyzer:
@@ -1019,9 +1943,14 @@ class JavaAnalyzer:
         self.tainted_vars: Dict[str, int] = {}  # var_name -> line where tainted
         self.method_params: Dict[str, Set[str]] = {}  # method_name -> set of param names
 
+        # Lambda tracking for functional interface taint flow
+        self.lambda_definitions: Dict[str, dict] = {}  # var_name -> {params, body_lines, sinks}
+
         # Pre-analyze to identify taint sources
         self._identify_method_params()
+        self._identify_lambda_definitions()
         self._track_variable_assignments()
+        self._track_lambda_taint_flow()
 
     def _identify_method_params(self):
         """Identify method parameters as potential taint sources."""
@@ -1084,6 +2013,161 @@ class JavaAnalyzer:
                             if re.search(rf'\b{re.escape(tainted_var)}\b', rhs):
                                 self.tainted_vars[var_name] = i
                                 break
+
+    def _identify_lambda_definitions(self):
+        """
+        Identify lambda/closure definitions and extract their parameters.
+        Tracks: Consumer<T> action = (param) -> { ... }
+        """
+        # Pattern for lambda assignment: varName = (params) -> { body } or (params) -> expr
+        lambda_assign = re.compile(
+            r'(\w+)\s*=\s*\(([^)]*)\)\s*->\s*(\{?)',
+            re.MULTILINE
+        )
+
+        for i, line in enumerate(self.source_lines, 1):
+            if '->' not in line:
+                continue
+
+            match = lambda_assign.search(line)
+            if not match:
+                continue
+
+            var_name = match.group(1)
+            params_str = match.group(2).strip()
+            has_brace = match.group(3) == '{'
+
+            # Parse lambda parameters (may have type annotations)
+            params = []
+            if params_str:
+                for param in params_str.split(','):
+                    parts = param.strip().split()
+                    param_name = parts[-1] if parts else None
+                    if param_name:
+                        params.append(param_name)
+
+            # Find lambda body extent
+            body_start = i
+            body_end = i
+
+            if has_brace:
+                # Multi-line lambda - find closing brace
+                brace_count = line.count('{') - line.count('}')
+                for j in range(i, min(len(self.source_lines), i + 50)):
+                    if j > i:
+                        brace_count += self.source_lines[j - 1].count('{')
+                        brace_count -= self.source_lines[j - 1].count('}')
+                    if brace_count <= 0:
+                        body_end = j
+                        break
+
+            # Extract body lines and check for sinks
+            body_lines = self.source_lines[body_start - 1:body_end]
+            body_text = '\n'.join(body_lines)
+
+            # Identify sinks within the lambda that use lambda parameters
+            sinks = []
+            sink_patterns = [
+                (r'new\s+File\s*\(', 'File'),
+                (r'Files\s*\.\s*(?:read|write|delete|copy|move)', 'Files'),
+                (r'Runtime\s*\..*exec\s*\(', 'exec'),
+                (r'ProcessBuilder', 'ProcessBuilder'),
+                (r'\.executeQuery\s*\(', 'SQL'),
+                (r'\.execute\s*\(', 'SQL'),
+            ]
+
+            for pattern, sink_type in sink_patterns:
+                if re.search(pattern, body_text):
+                    # Check if any lambda param is used in the sink context
+                    for param in params:
+                        if re.search(rf'\b{re.escape(param)}\b', body_text):
+                            sinks.append({
+                                'type': sink_type,
+                                'param': param,
+                                'line': body_start
+                            })
+
+            self.lambda_definitions[var_name] = {
+                'params': params,
+                'body_start': body_start,
+                'body_end': body_end,
+                'sinks': sinks
+            }
+
+    def _track_lambda_taint_flow(self):
+        """
+        Track taint propagation through lambda invocations.
+
+        Handles two patterns:
+        1. Direct: consumer.accept(taintedVar) - lambda param becomes tainted
+        2. Indirect: method(taintedVar, lambdaVar) - lambda may receive tainted data
+        """
+        # Pattern 1: Functional interface invocation with tainted argument
+        # e.g., worker.accept(data), func.apply(input)
+        invoke_patterns = [
+            (r'(\w+)\s*\.\s*accept\s*\(\s*([^)]+)\s*\)', 'Consumer'),
+            (r'(\w+)\s*\.\s*apply\s*\(\s*([^)]+)\s*\)', 'Function'),
+            (r'(\w+)\s*\.\s*test\s*\(\s*([^)]+)\s*\)', 'Predicate'),
+            (r'(\w+)\s*\.\s*get\s*\(\s*\)', 'Supplier'),
+            (r'(\w+)\s*\.\s*run\s*\(\s*\)', 'Runnable'),
+        ]
+
+        # Track which variables might hold lambdas (via method params)
+        lambda_holders: Dict[str, str] = {}  # holder_var -> potential lambda source
+
+        for i, line in enumerate(self.source_lines, 1):
+            # Track method parameters that are functional interfaces
+            func_param_pattern = r'(?:Consumer|Function|Supplier|Predicate|Runnable|Callable)\s*(?:<[^>]+>)?\s+(\w+)'
+            for match in re.finditer(func_param_pattern, line):
+                param_name = match.group(1)
+                lambda_holders[param_name] = f"param@{i}"
+
+            # Check for functional interface invocations
+            for pattern, iface_type in invoke_patterns:
+                match = re.search(pattern, line)
+                if not match:
+                    continue
+
+                invoker = match.group(1)
+                args = match.group(2) if len(match.groups()) > 1 else ""
+
+                # Check if args contain tainted data
+                is_tainted, taint_var = self._is_tainted(args)
+                if not is_tainted:
+                    continue
+
+                # The invoker is a functional interface being called with tainted data
+                # Find which lambda this corresponds to and taint its parameters
+                if invoker in lambda_holders or invoker in self.lambda_definitions:
+                    # Direct lambda invocation - taint the lambda's parameters
+                    if invoker in self.lambda_definitions:
+                        for param in self.lambda_definitions[invoker]['params']:
+                            self.tainted_vars[param] = i
+
+        # Pattern 2: Method calls passing tainted data alongside lambdas
+        # e.g., executeAction(input, action) where input is tainted and action is a lambda
+        method_call_pattern = r'(\w+)\s*\(\s*([^)]+)\s*\)'
+
+        for i, line in enumerate(self.source_lines, 1):
+            for match in re.finditer(method_call_pattern, line):
+                args_str = match.group(2)
+                args = [a.strip() for a in args_str.split(',')]
+
+                if len(args) < 2:
+                    continue
+
+                # Check if any arg is tainted and any other arg is a lambda
+                tainted_args = [a for a in args if a in self.tainted_vars]
+                lambda_args = [a for a in args if a in self.lambda_definitions]
+
+                if tainted_args and lambda_args:
+                    # Tainted data is being passed alongside a lambda
+                    # Conservatively assume the lambda may receive the tainted data
+                    for lambda_var in lambda_args:
+                        lambda_def = self.lambda_definitions[lambda_var]
+                        for param in lambda_def['params']:
+                            if param not in self.tainted_vars:
+                                self.tainted_vars[param] = i
 
     def _is_tainted(self, line: str) -> Tuple[bool, Optional[str]]:
         """Check if a line contains tainted data."""
@@ -2420,6 +3504,7 @@ class ASTScanner:
 
         tracker = PythonTaintTracker(source_code, file_path)
         tracker.visit(tree)
+        tracker._check_evasion_patterns()  # Run evasion detection after AST visit
 
         return self._filter_findings(tracker.findings)
 

@@ -1950,21 +1950,19 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
         name="SQL Injection - Query Built via Method Return (Indirect Taint)",
         category=VulnCategory.SQL_INJECTION,
         patterns=[
-            # Method that returns/builds SQL (common naming patterns)
-            r'def\s+\w*(query|sql|build|get|create|make|format|generate)\w*\s*\([^)]*\)\s*.*(?:SELECT|INSERT|UPDATE|DELETE)',
-            r'function\s+\w*(query|sql|build|get|create|make|format|generate)\w*\s*\([^)]*\)',
-            r'private\s+String\s+\w*(query|sql|build|get|create|make|format|generate)\w*\s*\(',
-            r'public\s+String\s+\w*(query|sql|build|get|create|make|format|generate)\w*\s*\(',
-            r'protected\s+String\s+\w*(query|sql|build|get|create|make|format|generate)\w*\s*\(',
+            # Method that returns/builds SQL (common naming patterns) - requires SQL keyword in context
+            r'def\s+\w*(query|sql|build_query|build_sql|create_query|create_sql|make_query|format_query|generate_query)\w*\s*\([^)]*\)\s*.*(?:SELECT|INSERT|UPDATE|DELETE)',
+            r'function\s+\w*(query|sql|buildQuery|buildSql|createQuery|createSql|makeQuery|formatQuery|generateQuery)\w*\s*\([^)]*\)',
+            r'private\s+String\s+\w*(query|sql|buildQuery|buildSql|createQuery|createSql)\w*\s*\(',
+            r'public\s+String\s+\w*(query|sql|buildQuery|buildSql|createQuery|createSql)\w*\s*\(',
+            r'protected\s+String\s+\w*(query|sql|buildQuery|buildSql|createQuery|createSql)\w*\s*\(',
             # Return statement with SQL
             r'return\s+["\']SELECT\s+',
             r'return\s+["\']INSERT\s+',
             r'return\s+["\']UPDATE\s+',
             r'return\s+["\']DELETE\s+',
-            r'return\s+\w+\s*\+\s*["\']',
-            r'return\s+.*\.toString\s*\(\s*\)',
-            # Variable assignment from method that might build SQL
-            r'\w+\s*=\s*\w*(build|format|get|create|make|generate)\w*\s*\([^)]*\)',
+            # Variable assignment from method that builds SQL (more specific - must have sql/query in name)
+            r'\w+\s*=\s*\w*(buildQuery|buildSql|createQuery|createSql|makeQuery|formatQuery|generateQuery|getSql|getQuery)\w*\s*\([^)]*\)',
         ],
         severity=Severity.MEDIUM,
         languages=[".java", ".kt", ".scala", ".py", ".js", ".ts", ".cs", ".rb", ".go"],
@@ -1976,6 +1974,17 @@ VULNERABILITY_PATTERNS: List[VulnerabilityPattern] = [
             r'sanitize',
             r'escape',
             r'validate',
+            # Python built-ins that are not SQL related
+            r'getattr\s*\(',
+            r'__import__\s*\(',
+            r'hasattr\s*\(',
+            r'setattr\s*\(',
+            # Common non-SQL modules
+            r'yaml\.',
+            r'pickle\.',
+            r'json\.',
+            r'marshal\.',
+            r'__builtins__',
         ],
     ),
 
