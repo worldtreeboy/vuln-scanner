@@ -1,28 +1,30 @@
-# WORLDTREEBOY Vulnerability Scanner
-
-```
+<h1 align="center">
+  <br>
+  <pre>
 ██╗    ██╗ ██████╗ ██████╗ ██╗     ██████╗ ████████╗██████╗ ███████╗███████╗██████╗  ██████╗ ██╗   ██╗
 ██║    ██║██╔═══██╗██╔══██╗██║     ██╔══██╗╚══██╔══╝██╔══██╗██╔════╝██╔════╝██╔══██╗██╔═══██╗╚██╗ ██╔╝
 ██║ █╗ ██║██║   ██║██████╔╝██║     ██║  ██║   ██║   ██████╔╝█████╗  █████╗  ██████╔╝██║   ██║ ╚████╔╝
 ██║███╗██║██║   ██║██╔══██╗██║     ██║  ██║   ██║   ██╔══██╗██╔══╝  ██╔══╝  ██╔══██╗██║   ██║  ╚██╔╝
 ╚███╔███╔╝╚██████╔╝██║  ██║███████╗██████╔╝   ██║   ██║  ██║███████╗███████╗██████╔╝╚██████╔╝   ██║
  ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═════╝    ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚═════╝  ╚═════╝    ╚═╝
-                        ╔═╗╔═╗╔╦╗  ╔╗ ┌─┐┌─┐┌─┐┌┬┐  ╔═╗┌─┐┌─┐┌┐┌┌┐┌┌─┐┬─┐
-                        ╠═╣╚═╗ ║   ╠╩╗├─┤└─┐├┤  ││  ╚═╗│  ├─┤││││││├┤ ├┬┘
-                        ╩ ╩╚═╝ ╩   ╚═╝┴ ┴└─┘└─┘─┴┘  ╚═╝└─┘┴ ┴┘└┘┘└┘└─┘┴└─
-                                   Security Scanner v2.0
-                      Taint Tracking | Multi-Language | Deep Analysis
-```
+  </pre>
+</h1>
+
+<h4 align="center">Advanced Multi-Language Static Analysis Security Scanner with Taint Tracking</h4>
 
 <p align="center">
-  <strong>Advanced Multi-Language Static Code Security Analysis</strong><br>
-  <sub>Taint Tracking | AST Analysis | Evasion Detection | Configuration Auditing</sub>
+  <a href="#features">Features</a> •
+  <a href="#installation">Installation</a> •
+  <a href="#usage">Usage</a> •
+  <a href="#detection-patterns">Detection Patterns</a> •
+  <a href="#integration">Integration</a>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.8+-3776ab?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.8+">
   <img src="https://img.shields.io/badge/platform-Windows%20|%20Linux%20|%20macOS-0078D4?style=for-the-badge" alt="Platform">
   <img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="License">
+  <img src="https://img.shields.io/badge/version-2.0-red?style=for-the-badge" alt="Version">
 </p>
 
 <p align="center">
@@ -33,473 +35,287 @@
   <img src="https://img.shields.io/badge/PHP-777BB4?style=flat-square&logo=php&logoColor=white" alt="PHP">
   <img src="https://img.shields.io/badge/Go-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
   <img src="https://img.shields.io/badge/Ruby-CC342D?style=flat-square&logo=ruby&logoColor=white" alt="Ruby">
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript">
 </p>
 
 ---
 
 ## Overview
 
-A powerful cross-platform static analysis toolkit for detecting security vulnerabilities across multiple languages. Features advanced taint tracking, evasion detection, and configuration security auditing.
-
-<table>
-<tr>
-<td width="50%">
-
-### AST Scanner
-**Deep analysis with taint tracking**
-
-- Traces user input through code paths
-- Context-aware detection with confidence scoring
-- Constant folding & obfuscation detection
-- Destructor/Finalizer delayed execution detection
-- Constructor-to-field taint propagation
-- JNI native method detection (Java)
-- ASP.NET ViewState & web.config analysis
-- Shadow eval & dynamic code detection (JS)
-
-</td>
-<td width="50%">
-
-### Regex Scanner
-**Fast pattern-based detection**
-
-- High-speed directory scanning
-- Binary & DLL analysis
-- .NET decompilation (ILSpy)
-- Broad pattern coverage
-- CI/CD integration ready
-
-</td>
-</tr>
-</table>
-
----
-
-## What's New
-
-### Latest Features
-
-| Feature | Description | Languages |
-|---------|-------------|-----------|
-| **Logic-Based Evasion Detection** | Advanced patterns that hide source-to-sink connections | Multi-lang |
-| **Python getattr Shadow** | getattr() with user-controlled attribute names | Python |
-| **PHP strrev Evasion** | strrev("urhtssap") → "passthru" variable function calls | PHP |
-| **C# LINQ Taint Tunnel** | Collection.Select(x => $"/c {x}") to Process.Start | C# |
-| **JS Proxy Trap Detection** | Proxy get/set handlers with eval, innerHTML sinks | JavaScript |
-| **Java ScriptEngine + Base64** | Base64.decode() flowing to ScriptEngine.eval() | Java |
-| **Destructor Command Injection** | Detects delayed execution attacks via C# finalizers | C# |
-| **XSLT XXE Detection** | XslCompiledTransform with XsltSettings.TrustedXslt | C# |
-| **ViewState Vulnerability Scanner** | EnableViewStateMac, ViewStateEncryptionMode analysis | C#, ASP.NET |
-| **Web.config Analyzer** | MachineKey, CustomErrors, Debug mode, Session settings | ASP.NET |
-| **Shadow Eval Detection** | Reversed strings, indirect eval, dynamic global access | JavaScript |
-| **Express.js Taint Propagation** | req.query/body/params through template literals to exec | JavaScript |
-| **Evasive Pattern Detection** | XPath, SSRF, SSTI, TypeNameHandling, string.Format SQLi | C#, Java |
-
----
-
-## AST Scanner - Deep Analysis Engine
-
-The AST scanner (`ast-scanner.py`) provides advanced vulnerability detection through **taint tracking** - following user-controlled data from sources to dangerous sinks.
-
-### How Taint Tracking Works
+**WORLDTREEBOY** is a next-generation static analysis security scanner that uses **taint tracking** to trace user-controlled data from sources to dangerous sinks. Unlike simple pattern matching, it understands code flow, detects evasion techniques, and provides high-confidence findings with minimal false positives.
 
 ```
 ┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
 │    TAINT SOURCE     │────▶│    PROPAGATION      │────▶│   DANGEROUS SINK    │
 │                     │     │                     │     │                     │
-│ • request.args      │     │ • Assignment        │     │ • cursor.execute()  │
-│ • req.query.id      │     │ • Template literals │     │ • childProcess.exec │
-│ • Request.Form[]    │     │ • String.Format()   │     │ • ProcessStartInfo  │
-│ • Constructor args  │     │ • Field propagation │     │ • Destructors (~)   │
+│ • request.args      │     │ • Variable assign   │     │ • cursor.execute()  │
+│ • req.query.id      │     │ • Template literals │     │ • Process.Start()   │
+│ • Request.Form[]    │     │ • String.Format()   │     │ • eval() / exec()   │
+│ • Constructor args  │     │ • Field propagation │     │ • innerHTML         │
 └─────────────────────┘     └─────────────────────┘     └─────────────────────┘
 ```
 
-### Taint Sources by Framework
-
-| Framework | Sources |
-|-----------|---------|
-| **Flask** | `request.args`, `request.form`, `request.json`, `request.data`, `request.cookies` |
-| **Django** | `request.GET`, `request.POST`, `request.body`, `request.META`, `request.FILES` |
-| **FastAPI** | `Query()`, `Body()`, `Form()`, `File()`, `Header()`, `Cookie()`, `Path()` |
-| **Express.js** | `req.query.*`, `req.body.*`, `req.params.*`, `req.cookies`, `req.headers` |
-| **ASP.NET** | `Request.QueryString`, `Request.Form`, `Request[]`, `HttpContext.Request` |
-| **Spring** | `@RequestParam`, `@PathVariable`, `@RequestBody`, `HttpServletRequest` |
-| **General** | `input()`, `sys.argv`, `os.environ`, `process.argv`, `Environment.GetCommandLineArgs()` |
-
 ---
 
-## Vulnerability Categories
+## Features
 
 <table>
 <tr>
-<th>Category</th>
-<th>Severity</th>
-<th>Detection Techniques</th>
-</tr>
-<tr>
-<td><strong>XSS (Cross-Site Scripting)</strong></td>
-<td><code>CRITICAL</code></td>
-<td>DOM-based (innerHTML, document.write), Reflected (res.send), jQuery, React, Angular, Vue</td>
-</tr>
-<tr>
-<td><strong>SQL Injection</strong></td>
-<td><code>CRITICAL</code></td>
-<td>Taint tracking, String.Format patterns, StringBuilder analysis</td>
-</tr>
-<tr>
-<td><strong>Command Injection</strong></td>
-<td><code>CRITICAL</code></td>
-<td>ProcessStartInfo blocks, shell=True, destructor patterns</td>
-</tr>
-<tr>
-<td><strong>Code Injection</strong></td>
-<td><code>CRITICAL</code></td>
-<td>eval/exec taint, shadow eval, indirect invocation</td>
-</tr>
-<tr>
-<td><strong>Deserialization</strong></td>
-<td><code>CRITICAL</code></td>
-<td>TypeNameHandling, pickle, ViewState MAC disabled</td>
-</tr>
-<tr>
-<td><strong>XXE</strong></td>
-<td><code>CRITICAL</code></td>
-<td>XslCompiledTransform, XsltSettings.TrustedXslt, XmlResolver</td>
-</tr>
-<tr>
-<td><strong>SSTI</strong></td>
-<td><code>CRITICAL</code></td>
-<td>RazorEngine.RunCompile, Jinja2, Velocity taint flow</td>
-</tr>
-<tr>
-<td><strong>SSRF</strong></td>
-<td><code>HIGH</code></td>
-<td>HttpClient, WebRequest, RestSharp with user URLs</td>
-</tr>
-<tr>
-<td><strong>XPath Injection</strong></td>
-<td><code>HIGH</code></td>
-<td>XPathNavigator.Select, XmlDocument.SelectNodes taint</td>
-</tr>
-<tr>
-<td><strong>Path Traversal</strong></td>
-<td><code>HIGH</code></td>
-<td>File operations with user-controlled paths</td>
-</tr>
-<tr>
-<td><strong>ViewState Attacks</strong></td>
-<td><code>CRITICAL</code></td>
-<td>EnableViewStateMac=false, MachineKey validation=None</td>
-</tr>
-<tr>
-<td><strong>Session Fixation</strong></td>
-<td><code>HIGH</code></td>
-<td>Cookieless sessions, URL-embedded session IDs</td>
-</tr>
-<tr>
-<td><strong>Info Disclosure</strong></td>
-<td><code>MEDIUM</code></td>
-<td>Debug mode, custom errors off, directory browsing</td>
+<td width="50%">
+
+### Core Capabilities
+- **Taint Tracking Engine** - Traces data flow from input to sink
+- **Multi-Language Support** - 8+ languages with framework awareness
+- **Evasion Detection** - Catches obfuscation, encoding, indirection
+- **Confidence Scoring** - HIGH/MEDIUM/LOW confidence levels
+- **Context-Aware Analysis** - Understands code semantics
+
+</td>
+<td width="50%">
+
+### Detection Categories
+- SQL/NoSQL Injection
+- Command Injection
+- Code Injection (eval/exec)
+- XXE & XSLT Attacks
+- SSRF & SSTI
+- Insecure Deserialization
+- Path Traversal
+- Prototype Pollution
+
+</td>
 </tr>
 </table>
 
+### Detection Status
+
+| Category | Detection Quality | Notes |
+|----------|:-----------------:|-------|
+| Command Injection | Excellent | Full taint tracking, ProcessStartInfo analysis, destructor patterns |
+| SQL/NoSQL Injection | Excellent | MongoDB $where, sprintf patterns, taint propagation |
+| Code Injection | Excellent | eval/exec, ScriptEngine, reflection, getattr attacks |
+| Deserialization | Excellent | TypeNameHandling, pickle, ViewState, YAML |
+| XXE/XSLT | Excellent | XslCompiledTransform, XsltSettings, XmlResolver |
+| SSRF/SSTI | Good | HttpClient, RazorEngine, template injection |
+| XSS | Basic | DOM sinks detected, but **taint tracking not fully implemented for XSS** |
+
+> **Note:** XSS detection currently relies on pattern matching rather than full taint analysis. It catches obvious DOM-based XSS (innerHTML, document.write) and framework-specific patterns, but may miss complex data flow scenarios. Improvements planned for future releases.
+
 ---
 
-## Quick Start
-
-### Basic Scanning
+## Installation
 
 ```bash
-# AST-based scan with taint tracking (recommended for code review)
+# Clone the repository
+git clone https://github.com/worldtreeboy/vuln-scanner.git
+cd vuln-scanner
+
+# No dependencies required - pure Python 3.8+
+python3 ast-scanner.py --help
+```
+
+---
+
+## Usage
+
+### Quick Start
+
+```bash
+# Scan a project directory
 python3 ast-scanner.py /path/to/project
 
-# Scan single file
+# Scan a single file
 python3 ast-scanner.py vulnerable_app.cs
 
-# Scan ASP.NET configuration files
-python3 ast-scanner.py web.config
+# Scan with JSON output
+python3 ast-scanner.py project/ --output json -o report.json
 ```
 
 ### Filter by Category
 
 ```bash
 # Focus on injection vulnerabilities
-python3 ast-scanner.py project/ --category sql code command
+python3 ast-scanner.py project/ --category sql command code
 
-# Check for deserialization issues (including ViewState)
+# Check for deserialization issues
 python3 ast-scanner.py project/ --category deser
 
-# SSRF and XXE only
-python3 ast-scanner.py project/ --category ssrf xxe
+# NoSQL and XXE only
+python3 ast-scanner.py project/ --category nosql xxe
 ```
 
 ### Filter by Confidence
 
 ```bash
-# Only high-confidence findings (fewer false positives)
+# High-confidence findings only (fewer false positives)
 python3 ast-scanner.py project/ --min-confidence HIGH
 
 # Include medium confidence
 python3 ast-scanner.py project/ --min-confidence MEDIUM
 ```
 
-### Output Formats
+### Vendor File Handling
+
+By default, vendor libraries and minified files are excluded to reduce noise:
 
 ```bash
-# JSON output for integration
-python3 ast-scanner.py project/ --output json -o report.json
-
-# Verbose mode for debugging
-python3 ast-scanner.py project/ -v
-```
-
-### File Exclusions
-
-By default, the scanner excludes vendor libraries and minified files to reduce noise:
-
-**Excluded by default:**
-- Minified files: `*.min.js`, `*.min.css`, `*.bundle.js`, `*.chunk.js`
-- Vendor libraries: jquery, bootstrap, angular, react, vue, lodash, moment, axios, etc.
-- Directories: `node_modules`, `vendor`, `dist`, `build`, `bower_components`, etc.
-
-```bash
-# Normal scan (excludes vendor/minified by default)
+# Default scan (excludes node_modules, *.min.js, etc.)
 python3 ast-scanner.py project/
 
 # Scan everything including vendor files
 python3 ast-scanner.py project/ --scan-all
-
-# Verbose mode shows skipped files
-python3 ast-scanner.py project/ -v
-# Output: [*] Skipping vendor/minified file: bootstrap.min.js
 ```
+
+**Excluded by default:** `*.min.js`, `*.bundle.js`, `jquery*.js`, `bootstrap*.js`, `angular*.js`, `react*.js`, `vue*.js`, `lodash*.js`, `node_modules/`, `vendor/`, `dist/`, `build/`
 
 ---
 
-## Language Support
+## Detection Patterns
 
-<table>
-<tr>
-<th>Language</th>
-<th>Extensions</th>
-<th>Special Features</th>
-</tr>
-<tr>
-<td><strong>Python</strong></td>
-<td><code>.py</code></td>
-<td>Full AST parsing, pickle/yaml/marshal detection, virtual sinks</td>
-</tr>
-<tr>
-<td><strong>JavaScript/TypeScript</strong></td>
-<td><code>.js</code>, <code>.ts</code>, <code>.jsx</code>, <code>.tsx</code></td>
-<td>Shadow eval detection, Express.js taint propagation, template literals</td>
-</tr>
-<tr>
-<td><strong>Java/Kotlin/Scala</strong></td>
-<td><code>.java</code>, <code>.kt</code>, <code>.scala</code></td>
-<td>JNI detection, Spring annotations, reflection-based evasion</td>
-</tr>
-<tr>
-<td><strong>C#</strong></td>
-<td><code>.cs</code></td>
-<td>ProcessStartInfo blocks, destructors, ViewState, XSLT XXE, async methods</td>
-</tr>
-<tr>
-<td><strong>ASP.NET Config</strong></td>
-<td><code>.config</code></td>
-<td>MachineKey, ViewState settings, authentication, session state</td>
-</tr>
-<tr>
-<td><strong>PHP</strong></td>
-<td><code>.php</code>, <code>.phtml</code></td>
-<td>Variable tracking, include/require analysis</td>
-</tr>
-<tr>
-<td><strong>Go</strong></td>
-<td><code>.go</code></td>
-<td>os/exec detection, template injection</td>
-</tr>
-<tr>
-<td><strong>Ruby</strong></td>
-<td><code>.rb</code>, <code>.erb</code></td>
-<td>ERB injection, system/exec/backtick detection</td>
-</tr>
-</table>
+### Logic-Based Evasion Detection
 
----
+Catches sophisticated patterns that hide the connection between source and sink:
 
-## Advanced Detection Features
+<details>
+<summary><b>Python: getattr Shadow Attack</b></summary>
 
-### Cross-Site Scripting (XSS) Detection
+```python
+# DETECTED: getattr with user-controlled attribute name
+func_name = user_data.get("action")
+method = getattr(module, func_name)   # Can access any attribute
+method(user_data.get("arg"))          # Execute arbitrary code
 
-Comprehensive XSS detection for DOM-based, Reflected, and framework-specific patterns:
-
-**DOM-Based XSS (JavaScript)**:
-```javascript
-// DETECTED: innerHTML with location.hash
-document.getElementById('content').innerHTML = location.hash;
-
-// DETECTED: document.write with referrer
-document.write('<div>' + document.referrer + '</div>');
-
-// DETECTED: jQuery .html() with user data
-$('#output').html(userInput);
+# DETECTED: getattr accessing os module
+method_name = request.args.get('method')
+handler = getattr(os, method_name)    # Attacker calls os.system, etc.
 ```
+</details>
 
-**Reflected XSS (Express.js)**:
-```javascript
-// DETECTED: Template literal in response
-res.send(`<h1>Search: ${req.query.q}</h1>`);
+<details>
+<summary><b>PHP: strrev() Variable Function Evasion</b></summary>
 
-// DETECTED: Concatenation in response
-res.send('<h1>Hello, ' + req.query.name + '</h1>');
-```
-
-**Framework-Specific**:
-```javascript
-// DETECTED: React dangerouslySetInnerHTML
-<div dangerouslySetInnerHTML={{ __html: userContent }} />
-
-// DETECTED: Angular innerHTML binding
-<div [innerHTML]="userContent"></div>
-
-// DETECTED: Vue v-html directive
-<div v-html="userContent"></div>
-```
-
-**PHP XSS**:
 ```php
-// DETECTED: Direct superglobal output
-echo $_GET['name'];
+// DETECTED: strrev() hides 'passthru'
+$func = strrev("urhtssap");  // Decodes to "passthru"
+$func($_GET['cmd']);         // Variable function executes command
 
-// DETECTED: Tainted variable output
-$input = $_POST['data'];
-echo $input;
+// DETECTED: strrev() hides 'system', 'shell_exec', 'exec'
+$exec = strrev("metsys");    // Decodes to "system"
+$exec($user_input);          // Command injection
 ```
+</details>
 
-### Evasive DOM-Based XSS Detection
+<details>
+<summary><b>C#: LINQ Taint Tunnel</b></summary>
 
-Advanced detection for obfuscated XSS patterns that bypass simple AST analysis:
+```csharp
+// DETECTED: LINQ Select transforms tainted data for shell
+var commands = new List<string> { userInput };
+var shellCmds = commands.Select(x => $"/c {x}").ToList();
+Process.Start("cmd.exe", shellCmds.FirstOrDefault());
 
-**Pattern 1: ASCII Array Encoding (String.fromCharCode)**
+// DETECTED: LINQ chain with FirstOrDefault to Process.Start
+var result = userInputs
+    .Where(x => x.Length > 0)
+    .Select(x => $"-Command {x}")
+    .FirstOrDefault();
+Process.Start("powershell.exe", result);
+```
+</details>
+
+<details>
+<summary><b>JavaScript: Proxy Trap Evasion</b></summary>
+
 ```javascript
-// DETECTED: ASCII codes spelling "innerHTML" and "eval"
-const _0x5f21 = [105, 110, 110, 101, 114, 72, 84, 77, 76]; // "innerHTML"
-const _0x9922 = [101, 118, 97, 108];                      // "eval"
+// DETECTED: Proxy get trap with eval
+const evasiveProxy = new Proxy({}, {
+    get: (target, prop) => eval(sessionStorage.getItem(prop))
+});
+evasiveProxy.anything;  // Any property access triggers eval
 
-// DETECTED: Decoding via map/fromCharCode/join
-const decode = (arr) => arr.map(c => String.fromCharCode(c)).join('');
+// DETECTED: Proxy set trap with innerHTML
+const proxy = new Proxy({}, {
+    set: (t, p, v) => { element.innerHTML = v; return true; }
+});
+proxy.content = location.hash;
 ```
+</details>
 
-**Pattern 2: Computed Property Access (String Fragments)**
+<details>
+<summary><b>Java: Base64 + ScriptEngine Evasion</b></summary>
+
+```java
+// DETECTED: Base64 decoded data flows to ScriptEngine
+byte[] decoded = Base64.getDecoder().decode(userInput);
+String script = new String(decoded);
+engine.eval(script);
+
+// DETECTED: Inline ScriptEngine chain
+new ScriptEngineManager().getEngineByName("js").eval(userInput);
+```
+</details>
+
+---
+
+### Evasive XSS Detection
+
+<details>
+<summary><b>ASCII Array Encoding</b></summary>
+
+```javascript
+// DETECTED: ASCII codes spelling "innerHTML"
+const _0x5f21 = [105, 110, 110, 101, 114, 72, 84, 77, 76];
+const decode = (arr) => arr.map(c => String.fromCharCode(c)).join('');
+element[decode(_0x5f21)] = userInput;
+```
+</details>
+
+<details>
+<summary><b>Computed Property Access</b></summary>
+
 ```javascript
 // DETECTED: Building sink name from fragments
-const p1 = "inn";
-const p2 = "erHT";
-const p3 = "ML";
-const sink = p1 + p2 + p3;  // Resolves to "innerHTML"
-
-// DETECTED: Dynamic property assignment
+const sink = "inn" + "erHT" + "ML";
 element[sink] = userInput;
 ```
+</details>
 
-**Pattern 3: Prototype Descriptor Abuse**
-```javascript
-// DETECTED: Indirect innerHTML setter via prototype
-Object.getOwnPropertyDescriptor(Element.prototype, sink).set.call(target, source);
-```
+<details>
+<summary><b>Async Taint Flow</b></summary>
 
-**Pattern 4: Async Taint Flow (setTimeout/Promise/RAF)**
 ```javascript
-// DETECTED: Taint source + sink in setTimeout callback
+// DETECTED: setTimeout/Promise/RAF with taint source + sink
 setTimeout(() => {
     document.body.innerHTML = sessionStorage.getItem('payload');
 }, 0);
-
-// DETECTED: Promise-based evasion
-Promise.resolve(localStorage.getItem('data'))
-    .then(data => elem.innerHTML = data);
-
-// DETECTED: requestAnimationFrame evasion
-requestAnimationFrame(() => {
-    document.body.outerHTML = window.name;
-});
 ```
+</details>
 
-**Pattern 5: Array-Based Taint Tunnel**
+<details>
+<summary><b>Sanitization Bypass Detection</b></summary>
+
 ```javascript
-// DETECTED: Taint hidden in array, sink built from indices
-const fragments = [
-    new URLSearchParams(location.search).get('xss'), // [0] Taint
-    "inner",                                         // [1]
-    "HTML"                                           // [2]
-];
-const sinkName = fragments[1] + fragments[2];
-body[sinkName] = fragments[0];
-```
-
-**Pattern 6: eval/Function Aliasing**
-```javascript
-// DETECTED: Aliasing eval to innocent variable name
-const run = window[decode(_0x9922)];  // run = eval
-
-// DETECTED: Aliased eval invocation with template literal
-run(`document.body.${sink} = "${data}"`);
-```
-
-### Sanitization Bypass Detection
-
-Detects flawed sanitization that can be bypassed:
-
-**First Occurrence Only (No Global Flag)**
-```javascript
-// DETECTED: .replace() only removes FIRST occurrence
+// DETECTED: .replace() only removes FIRST occurrence (no /g flag)
 let sanitized = input.replace("<script>", "");
-// Input: "<script><script>alert(1)" → Output: "<script>alert(1)"
-document.body.innerHTML = sanitized;
-```
 
-**Case-Sensitive Filters**
-```javascript
-// DETECTED: Missing 'i' flag - <SCRIPT> or <ScRiPt> bypasses
-let clean = input.replace(/<script>/g, "");
-```
+// DETECTED: Case-sensitive filter bypass
+let clean = input.replace(/<script>/g, "");  // Missing 'i' flag
 
-**Blacklist-Based Sanitization**
-```javascript
-// DETECTED: Fundamentally flawed approach
-if (input.includes("<script>") || input.includes("javascript:")) {
-    return "blocked";
-}
-// Bypassed by: <img onerror=...>, <svg onload=...>, data: URLs
-```
-
-**Nested Payload Vulnerability**
-```javascript
-// DETECTED: Removing "javascript" creates new vector
-let url = "javjavascriptascript:alert(1)";
-let safe = url.replace("javascript", "");  // → "javascript:alert(1)"
-```
-
-**Non-Recursive Sanitization**
-```javascript
-// DETECTED: Single-pass sanitization
-let clean = input.replace("<script>", "");
+// DETECTED: Non-recursive sanitization
+let safe = input.replace("<script>", "");
 // Input: "<scr<script>ipt>" → Output: "<script>"
 ```
+</details>
 
-**Prototype Pollution to XSS**
-```javascript
-// DETECTED: __proto__ can override sanitization
-Object.assign({}, userConfig);  // userConfig may contain __proto__
-```
+---
 
-### C# Destructor/Finalizer Command Injection
+### C# Advanced Detection
 
-Detects the "Bomb" pattern where command injection is hidden in destructors for delayed execution:
+<details>
+<summary><b>Destructor Command Injection</b></summary>
 
 ```csharp
-// DETECTED: Taint flows from constructor to destructor via field
+// DETECTED: Taint flows from constructor to destructor
 public class TimeDelayedPayload {
     private string _payload;
 
@@ -508,38 +324,43 @@ public class TimeDelayedPayload {
     }
 
     ~TimeDelayedPayload() {
-        // CRITICAL: Destructor command injection with field taint
+        // CRITICAL: Destructor executes with tainted field
         Process.Start("cmd.exe", "/c " + _payload);
     }
 }
 ```
+</details>
 
-### XSLT XXE Detection
-
-Detects XslCompiledTransform with dangerous settings:
+<details>
+<summary><b>ProcessStartInfo Block Analysis</b></summary>
 
 ```csharp
-// DETECTED: XsltSettings enables scripts and document() function
+// DETECTED: Object initializer with tainted Arguments
+ProcessStartInfo psi = new ProcessStartInfo {
+    FileName = "cmd.exe",
+    Arguments = "/c ping " + userInput,
+    UseShellExecute = false
+};
+Process.Start(psi);
+```
+</details>
+
+<details>
+<summary><b>XSLT XXE Detection</b></summary>
+
+```csharp
+// DETECTED: XsltSettings enables dangerous features
 var xslt = new XslCompiledTransform();
 xslt.Load(xslPath, XsltSettings.TrustedXslt, new XmlUrlResolver());
-
-// DETECTED: Explicit enable scripts
-var settings = new XsltSettings(true, true);
-xslt.Load(xslPath, settings, null);
 ```
+</details>
 
-### ASP.NET ViewState Vulnerability Detection
+---
 
-```csharp
-// DETECTED in .aspx files
-<%@ Page EnableViewStateMac="false" %>
+### Configuration Security
 
-// DETECTED in code-behind
-ViewStateEncryptionMode = ViewStateEncryptionMode.Never;
-EnableViewStateMac = false;
-```
-
-### Web.config Security Analysis
+<details>
+<summary><b>ASP.NET web.config Analysis</b></summary>
 
 ```xml
 <!-- CRITICAL: ViewState MAC globally disabled -->
@@ -553,155 +374,12 @@ EnableViewStateMac = false;
 
 <!-- HIGH: Cookieless sessions enable fixation -->
 <sessionState cookieless="true" />
-
-<!-- HIGH: Custom errors exposes stack traces -->
-<customErrors mode="Off" />
 ```
-
-### JavaScript Shadow Eval Detection
-
-Detects obfuscated code injection via string manipulation:
-
-```javascript
-// DETECTED: Reversed eval string
-const lave = "lave";
-const fn = global[lave.split('').reverse().join('')];
-fn(userInput);
-
-// DETECTED: Indirect eval via global object
-const g = (function(){return this})();
-g["ev" + "al"](code);
-
-// DETECTED: Bracket notation with string building
-const f = "ev";
-window[f + "al"](payload);
-```
-
-### Express.js Command Injection with Taint Propagation
-
-```javascript
-// DETECTED: Taint flows through template literal to exec
-const userInput = req.query.ip;           // Taint source
-const cmd = `ping -c 1 ${userInput}`;     // Taint propagates via ${}
-childProcess.exec(cmd, (err, stdout) => { // CRITICAL: Tainted var in exec
-    res.send(stdout);
-});
-```
-
-### Evasive C# Patterns
-
-```csharp
-// DETECTED: TypeNameHandling deserialization
-JsonConvert.DeserializeObject(data, new JsonSerializerSettings {
-    TypeNameHandling = TypeNameHandling.All  // RCE via gadget chains
-});
-
-// DETECTED: XPath Injection
-var nodes = doc.SelectNodes("/users/user[@id='" + userId + "']");
-
-// DETECTED: SSRF
-var client = new HttpClient();
-var response = await client.GetAsync(userProvidedUrl);
-
-// DETECTED: SSTI via RazorEngine
-Engine.Razor.RunCompile(userTemplate, "key", null, model);
-
-// DETECTED: SQL Injection via String.Format
-string query = String.Format("SELECT * FROM users WHERE id = {0}", userId);
-```
-
-### Logic-Based Evasion Detection
-
-Detects sophisticated patterns that hide the connection between source and sink using language-specific features:
-
-**Python: getattr Shadow Attack**
-```python
-# DETECTED: getattr with user-controlled attribute name
-func_name = user_data.get("action")  # User controls function name
-method = getattr(module, func_name)   # Can access any attribute/method
-method(user_data.get("arg"))          # Execute arbitrary code
-
-# DETECTED: getattr with tainted variable from request
-method_name = request.args.get('method')
-handler = getattr(os, method_name)    # Attacker can call os.system, etc.
-```
-
-**PHP: strrev() Variable Function Evasion**
-```php
-// DETECTED: strrev() hides 'passthru'
-$func = strrev("urhtssap");  // Decodes to "passthru"
-$func($_GET['cmd']);         // Variable function executes command
-
-// DETECTED: strrev() hides 'system'
-$exec = strrev("metsys");    // Decodes to "system"
-$exec($user_input);          // Command injection via variable function
-
-// DETECTED: strrev() hides 'shell_exec'
-$shell = strrev("cexe_llehs");  // Decodes to "shell_exec"
-```
-
-**C#: LINQ Taint Tunnel**
-```csharp
-// DETECTED: LINQ Select transforms tainted data for shell execution
-var commands = new List<string> { userInput };
-var shellCmds = commands.Select(x => $"/c {x}").ToList();
-Process.Start("cmd.exe", shellCmds.FirstOrDefault());
-
-// DETECTED: LINQ result flows to Process.Start
-var result = userInputs
-    .Where(x => x.Length > 0)
-    .Select(x => $"-Command {x}")
-    .FirstOrDefault();
-Process.Start("powershell.exe", result);
-```
-
-**JavaScript: Proxy Trap Evasion**
-```javascript
-// DETECTED: Proxy get trap with eval - any property access triggers eval
-const evasiveProxy = new Proxy({}, {
-    get: (target, prop) => eval(sessionStorage.getItem(prop))
-});
-evasiveProxy.anything;  // Triggers eval
-
-// DETECTED: Proxy set trap with innerHTML
-const proxy = new Proxy({}, {
-    set: (t, p, v) => { element.innerHTML = v; return true; }
-});
-proxy.content = location.hash;  // Triggers innerHTML assignment
-```
-
-**Java: Base64 + ScriptEngine Evasion**
-```java
-// DETECTED: Base64 decoded data flows to ScriptEngine
-byte[] decoded = Base64.getDecoder().decode(userInput);
-String script = new String(decoded);
-engine.eval(script);  // Attacker encodes malicious script to evade detection
-
-// DETECTED: Inline ScriptEngine chain with tainted data
-new ScriptEngineManager().getEngineByName("js").eval(userInput);
-```
-
-### ProcessStartInfo Block Analysis
-
-```csharp
-// DETECTED: Object initializer block with shell command
-ProcessStartInfo psi = new ProcessStartInfo {
-    FileName = "cmd.exe",
-    Arguments = "/c ping " + userInput,  // Tainted concatenation
-    UseShellExecute = false
-};
-Process.Start(psi);
-
-// DETECTED: 30+ system tools
-// ping, ipconfig, nslookup, tracert, netstat, git, curl, wget,
-// ssh, scp, nmap, sqlcmd, mysql, psql, docker, kubectl, etc.
-```
+</details>
 
 ---
 
 ## Sample Output
-
-### AST Scanner (Taint Tracking)
 
 ```
 ================================================================================
@@ -709,7 +387,6 @@ AST-BASED VULNERABILITY SCAN REPORT
 ================================================================================
 Scan Date: 2026-01-24 09:15:00
 Files Scanned: 42
-Parse Errors: 0
 Total Findings: 8
 
 Summary by Severity:
@@ -720,81 +397,36 @@ Summary by Severity:
 Summary by Confidence:
   HIGH      : 7
   MEDIUM    : 1
-
 ================================================================================
 
 FILE: Controllers/NetworkController.cs
 --------------------------------------------------------------------------------
 [CRITICAL] OS Command Injection - ProcessStartInfo with tainted Arguments (Confidence: HIGH)
   Line 45: Arguments = "/c ping " + address,
-  -> ProcessStartInfo.Arguments built with tainted variable 'address' from Request.QueryString.
+  -> ProcessStartInfo.Arguments built with tainted variable 'address'.
 
-[CRITICAL] Destructor Command Injection - Process execution in finalizer (Confidence: HIGH)
+[CRITICAL] Destructor Command Injection (Confidence: HIGH)
   Line 67: Process.Start("cmd.exe", "/c " + _payload);
   -> Destructor executes shell command with tainted field '_payload'.
 
 FILE: Services/XmlProcessor.cs
 --------------------------------------------------------------------------------
-[CRITICAL] XXE - XslCompiledTransform with XsltSettings.TrustedXslt (Confidence: HIGH)
+[CRITICAL] XXE - XslCompiledTransform with TrustedXslt (Confidence: HIGH)
   Line 23: xslt.Load(xslPath, XsltSettings.TrustedXslt, new XmlUrlResolver());
   -> XsltSettings.TrustedXslt enables scripts and document() - allows XXE/RCE.
 
 FILE: web.config
 --------------------------------------------------------------------------------
-[CRITICAL] Insecure Deserialization - Global ViewState MAC Disabled (Confidence: HIGH)
+[CRITICAL] Insecure Deserialization - ViewState MAC Disabled (Confidence: HIGH)
   Line 12: <pages enableViewStateMac="false" />
-  -> ViewState MAC disabled globally. Vulnerable to ysoserial.net gadgets.
-
-[HIGH] Information Disclosure - Debug Mode Enabled (Confidence: HIGH)
-  Line 18: <compilation debug="true" />
-  -> Debug mode exposes stack traces and compilation info.
+  -> ViewState MAC disabled. Vulnerable to ysoserial.net gadgets.
 
 ================================================================================
 ```
 
 ---
 
-## CLI Reference
-
-### AST Scanner
-
-```
-usage: ast-scanner.py [-h] [-v] [-c CATEGORY] [--output {text,json}]
-                      [-o OUTPUT_FILE] [--min-confidence {HIGH,MEDIUM,LOW}]
-                      [--scan-all] target
-
-Options:
-  target                    File or directory to scan
-  -v, --verbose             Enable detailed output
-  -c, --category CATEGORY   Filter by category (sql, code, command, etc.)
-  --output {text,json}      Output format
-  -o, --output-file FILE    Save report to file
-  --min-confidence LEVEL    Minimum confidence (HIGH, MEDIUM, LOW)
-  --scan-all                Include vendor libraries and minified files
-```
-
-### Categories
-
-| Flag | Description |
-|------|-------------|
-| `sql` | SQL Injection |
-| `nosql` | NoSQL Injection |
-| `code` | Code Injection (eval, exec) |
-| `command` | Command Injection (system, subprocess, ProcessStartInfo) |
-| `deser` | Insecure Deserialization (pickle, TypeNameHandling, ViewState) |
-| `ssti` | Server-Side Template Injection |
-| `ssrf` | Server-Side Request Forgery |
-| `xxe` | XML External Entity (including XSLT) |
-| `xpath` | XPath Injection |
-| `path` | Path Traversal |
-| `auth` | Authentication Bypass |
-| `proto` | Prototype Pollution |
-| `xss` | Cross-Site Scripting |
-| `all` | All categories (default) |
-
----
-
-## Integration Examples
+## Integration
 
 ### GitHub Actions
 
@@ -811,14 +443,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Run AST Scanner
+      - name: Run Security Scanner
         run: |
           python3 ast-scanner.py . --min-confidence HIGH --output json -o results.json
 
       - name: Check for Critical Findings
         run: |
           if grep -q '"severity": "CRITICAL"' results.json; then
-            echo "Critical vulnerabilities found!"
+            echo "::error::Critical vulnerabilities found!"
             exit 1
           fi
 
@@ -835,7 +467,7 @@ jobs:
 #!/bin/bash
 # .git/hooks/pre-commit
 
-python3 ast-scanner.py . --min-confidence HIGH --category sql code command deser
+python3 ast-scanner.py . --min-confidence HIGH --category sql command code deser
 if [ $? -ne 0 ]; then
     echo "Security vulnerabilities found. Commit blocked."
     exit 1
@@ -857,91 +489,111 @@ security-scan:
 
 ---
 
+## CLI Reference
+
+```
+usage: ast-scanner.py [-h] [-v] [-c CATEGORY] [--output {text,json}]
+                      [-o OUTPUT_FILE] [--min-confidence {HIGH,MEDIUM,LOW}]
+                      [--scan-all] target
+
+Arguments:
+  target                    File or directory to scan
+
+Options:
+  -h, --help                Show help message
+  -v, --verbose             Enable detailed output
+  -c, --category CATEGORY   Filter by category (sql, nosql, code, command, etc.)
+  --output {text,json}      Output format (default: text)
+  -o, --output-file FILE    Save report to file
+  --min-confidence LEVEL    Minimum confidence level (HIGH, MEDIUM, LOW)
+  --scan-all                Include vendor libraries and minified files
+```
+
+### Categories
+
+| Category | Description |
+|----------|-------------|
+| `sql` | SQL Injection |
+| `nosql` | NoSQL Injection (MongoDB, etc.) |
+| `code` | Code Injection (eval, exec, ScriptEngine) |
+| `command` | Command Injection (system, Process.Start) |
+| `deser` | Insecure Deserialization |
+| `ssti` | Server-Side Template Injection |
+| `ssrf` | Server-Side Request Forgery |
+| `xxe` | XML External Entity |
+| `xpath` | XPath Injection |
+| `xss` | Cross-Site Scripting |
+| `path` | Path Traversal |
+| `all` | All categories (default) |
+
+---
+
+## Language Support
+
+| Language | Extensions | Framework Support |
+|----------|------------|-------------------|
+| **Python** | `.py` | Flask, Django, FastAPI |
+| **JavaScript** | `.js`, `.jsx` | Express.js, React, Angular, Vue, jQuery |
+| **TypeScript** | `.ts`, `.tsx` | Node.js, Express, React |
+| **Java** | `.java` | Spring, Servlet API |
+| **Kotlin** | `.kt` | Android, Spring |
+| **C#** | `.cs` | ASP.NET, .NET Core |
+| **PHP** | `.php`, `.phtml` | Laravel, WordPress |
+| **Go** | `.go` | net/http, gin, echo |
+| **Ruby** | `.rb`, `.erb` | Rails, Sinatra |
+
+---
+
+## Taint Sources by Framework
+
+| Framework | Tracked Sources |
+|-----------|-----------------|
+| **Flask** | `request.args`, `request.form`, `request.json`, `request.data`, `request.cookies` |
+| **Django** | `request.GET`, `request.POST`, `request.body`, `request.META` |
+| **FastAPI** | `Query()`, `Body()`, `Form()`, `File()`, `Header()`, `Cookie()` |
+| **Express.js** | `req.query.*`, `req.body.*`, `req.params.*`, `req.cookies`, `req.headers` |
+| **ASP.NET** | `Request.QueryString`, `Request.Form`, `Request[]`, `HttpContext.Request` |
+| **Spring** | `@RequestParam`, `@PathVariable`, `@RequestBody`, `HttpServletRequest` |
+| **General** | `input()`, `sys.argv`, `os.environ`, `process.argv`, `Environment.GetCommandLineArgs()` |
+
+---
+
 ## Project Structure
 
 ```
 vuln-scanner/
-├── ast-scanner.py      # AST-based scanner with taint tracking
-├── vuln-scanner.py     # Regex-based pattern scanner
-├── README.md           # Documentation
-├── LICENSE             # MIT License
-└── test-files/         # Sample vulnerable configurations for testing
-    ├── sanitization-bypass.js        # JavaScript - Weak sanitization patterns
-    ├── evasive-xss.js                # JavaScript - Advanced evasion patterns
-    ├── evasive-proxy.js              # JavaScript - Proxy trap evasion patterns
-    ├── evasive-python.py             # Python - getattr shadow attack patterns
-    ├── evasive-php.php               # PHP - strrev variable function evasion
-    ├── evasive-csharp.cs             # C# - LINQ taint tunnel patterns
-    ├── evasive-java.java             # Java - Base64 + ScriptEngine evasion
-    ├── xss-test.js                   # JavaScript - DOM-based & Reflected XSS
-    ├── xss-test.php                  # PHP - Superglobal & tainted XSS
-    ├── web.config                    # ASP.NET - ViewState, MachineKey
-    ├── django-settings.py            # Django - DEBUG, SECRET_KEY, Pickle
-    ├── flask-config.py               # Flask - Debug, hardcoded keys
-    ├── express-config.js             # Express.js - Sessions, CORS, secrets
-    ├── typescript-config.ts          # TypeScript - Injection patterns
-    ├── rails-config.rb               # Ruby on Rails - Mass assignment, secrets
-    ├── spring-application.properties # Spring Boot - Actuator, H2 console
-    ├── php.ini                       # PHP - allow_url_include, display_errors
-    └── nginx.conf                    # Nginx - Path traversal, SSRF proxy
+├── ast-scanner.py      # Main scanner with taint tracking
+├── vuln-scanner.py     # Regex-based pattern scanner (legacy)
+├── README.md
+├── LICENSE
+└── test-files/         # Intentionally vulnerable test cases
+    ├── evasive-*.{py,php,cs,js,java}  # Evasion pattern tests
+    ├── sanitization-bypass.js          # Weak sanitization tests
+    ├── xss-test.{js,php}               # XSS pattern tests
+    ├── web.config                       # ASP.NET config tests
+    └── ...
 ```
-
-### Test Files
-
-The `test-files/` directory contains **intentionally vulnerable** configuration samples for testing the scanner. These demonstrate real-world security misconfigurations:
-
-| File | Framework | Key Vulnerabilities |
-|------|-----------|---------------------|
-| `sanitization-bypass.js` | JavaScript | Weak replace(), blacklist filters, nested payloads |
-| `evasive-xss.js` | JavaScript | ASCII encoding, prototype abuse, async taint, eval aliasing |
-| `evasive-proxy.js` | JavaScript | Proxy get/set traps with eval, innerHTML, document.write |
-| `evasive-python.py` | Python | getattr with user-controlled attribute names |
-| `evasive-php.php` | PHP | strrev() hides dangerous functions, variable function calls |
-| `evasive-csharp.cs` | C# | LINQ Select/Aggregate/Join taint tunneling to Process.Start |
-| `evasive-java.java` | Java | Base64 decoded payloads, ScriptEngine.eval chains |
-| `xss-test.js` | JavaScript | DOM-based XSS, Reflected XSS, jQuery, React, Angular, Vue |
-| `xss-test.php` | PHP | Direct superglobal output, tainted variable XSS |
-| `web.config` | ASP.NET | ViewState MAC disabled, MachineKey validation=None |
-| `django-settings.py` | Django | DEBUG=True, PickleSerializer, hardcoded SECRET_KEY |
-| `flask-config.py` | Flask | Debug mode, hardcoded credentials, insecure cookies |
-| `express-config.js` | Express.js | Weak sessions, CORS *, exposed stack traces |
-| `typescript-config.ts` | TypeScript | Command injection, SQLi, prototype pollution |
-| `rails-config.rb` | Rails | Mass assignment, YAML.load, hardcoded secrets |
-| `spring-application.properties` | Spring | Actuator exposed, H2 console, credentials |
-| `php.ini` | PHP | allow_url_include, disabled functions, display_errors |
-| `nginx.conf` | Nginx | Path traversal via alias, SSRF proxy_pass |
-
-> **Note:** These files are for testing only. The scanner works on any real code you provide.
 
 ---
 
-## Comparison: AST vs Regex Scanner
+## Contributing
 
-| Feature | AST Scanner | Regex Scanner |
-|---------|:-----------:|:-------------:|
-| **Speed** | Moderate | Fast |
-| **Accuracy** | Higher | Lower |
-| **Taint Tracking** | Yes | No |
-| **Confidence Scores** | Yes | No |
-| **Evasion Detection** | Yes | Limited |
-| **Config Analysis** | Yes (web.config) | No |
-| **Binary/DLL Analysis** | No | Yes |
-| **.NET Decompile** | No | Yes |
-| **Best For** | Security audits | CI/CD, quick scans |
+Contributions are welcome! Areas of focus:
 
-**Recommendation:**
-- Use `ast-scanner.py` for thorough security audits and code review
-- Use `vuln-scanner.py` for quick scans, CI pipelines, and binary analysis
+- Improving XSS taint tracking
+- Adding new language support
+- Framework-specific detection rules
+- False positive reduction
 
 ---
 
 ## Disclaimer
 
-This tool is for **authorized security testing only**.
+This tool is intended for **authorized security testing only**.
 
 - Obtain proper authorization before scanning third-party code
 - Verify findings manually - automated tools can produce false positives
-- Use as part of a comprehensive security program, not as a sole measure
+- Use as part of a comprehensive security program
 - The authors are not responsible for misuse of this tool
 
 ---
@@ -953,7 +605,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 ---
 
 <p align="center">
-  <strong>worldtreeboy</strong><br>
+  <b>worldtreeboy</b><br>
   <a href="https://github.com/worldtreeboy">github.com/worldtreeboy</a>
 </p>
 

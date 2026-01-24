@@ -4551,11 +4551,35 @@ class PHPAnalyzer:
             r'findOne\s*\(\s*\[\s*[\'\"]\$where', # findOne(['$where' => ...])
         ]
 
+        # MongoDB JavaScript string patterns (used in $where)
+        # Detects: sprintf("return this.field == '%s'", $var)
+        mongo_js_patterns = [
+            r'return\s+this\.',           # return this.field
+            r'this\.\w+\s*[=!<>]=',       # this.field == or this.field !=
+            r'this\.\w+\s*&&',            # this.field &&
+            r'this\.\w+\s*\|\|',          # this.field ||
+        ]
+
         for i, line in enumerate(self.source_lines, 1):
             if line.strip().startswith('//') or line.strip().startswith('#'):
                 continue
 
+            # Check for MongoDB $where JavaScript string construction
+            # Pattern: sprintf("return this.token == '%s'", $var) or "return this." . $var
+            for js_pattern in mongo_js_patterns:
+                if re.search(js_pattern, line):
+                    is_tainted, taint_var = self._is_tainted(line)
+                    # Check if it's string building (sprintf, concatenation, etc.)
+                    is_string_building = re.search(r'sprintf\s*\(|\..*\$|%s|%d|\$\w+.*\.', line)
+                    if is_tainted and is_string_building:
+                        self._add_finding(i, "NoSQL Injection - MongoDB $where JavaScript with tainted data",
+                                          VulnCategory.NOSQL_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                          "Building MongoDB $where JavaScript string with user input. "
+                                          "Attacker can inject arbitrary JavaScript code.")
+                        break  # Don't duplicate for same line
+
             # Check for MongoDB NoSQL injection first (higher priority)
+            is_nosql = False
             for pattern in nosql_dangerous:
                 if re.search(pattern, line):
                     is_tainted, taint_var = self._is_tainted(line)
@@ -4563,7 +4587,12 @@ class PHPAnalyzer:
                         self._add_finding(i, "NoSQL Injection - MongoDB $where with tainted data",
                                           VulnCategory.NOSQL_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
                                           "MongoDB $where operator allows JavaScript injection.")
-                        return  # Don't double-report
+                        is_nosql = True
+                        break
+
+            # Skip SQL injection check if already flagged as NoSQL or contains MongoDB patterns
+            if is_nosql or re.search(r'findOne|find\s*\(|->collection|MongoDB|\$where', line):
+                continue
 
             # Skip Eloquent ORM safe patterns (parameterized queries)
             is_eloquent_safe = any(re.search(p, line) for p in eloquent_safe_patterns)
