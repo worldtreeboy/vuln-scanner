@@ -1800,6 +1800,92 @@ class JavaScriptAnalyzer:
                                       VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH",
                                       "VM module allows arbitrary code execution.")
 
+        # Second pass: Check for "Shadow Eval" patterns (string manipulation to hide eval/Function)
+        self._check_shadow_eval()
+
+    def _check_shadow_eval(self):
+        """
+        Detect obfuscated eval/Function access via string manipulation.
+
+        Patterns like:
+          const s = "lave";
+          const checker = global[s.split("").reverse().join("")];
+          checker("malicious code");
+
+        This resolves "lave" reversed to "eval" and flags the dynamic global access.
+        """
+        # Track potential shadow variables (variables that might hold dangerous functions)
+        shadow_vars = {}
+
+        # Known dangerous function names (and their reverses for detection)
+        dangerous_funcs = {
+            'eval': 'lave',
+            'Function': 'noitcnuF',
+            'exec': 'cexe',
+            'execSync': 'cnySexe',
+        }
+        reversed_dangerous = {v: k for k, v in dangerous_funcs.items()}
+
+        for i, line in enumerate(self.source_lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*'):
+                continue
+
+            # Pattern 1: String containing reversed dangerous function name
+            # const s = "lave"; or const s = 'noitcnuF';
+            for rev_name, orig_name in reversed_dangerous.items():
+                if re.search(rf'["\']({re.escape(rev_name)})["\']', line):
+                    self._add_finding(i, f"Code Injection - Obfuscated '{orig_name}' string detected",
+                                      VulnCategory.CODE_INJECTION, Severity.HIGH, "HIGH",
+                                      f"String '{rev_name}' reverses to '{orig_name}'. Likely evasion technique.")
+
+            # Pattern 2: Dynamic global access with string manipulation
+            # global[...], window[...], globalThis[...], this[...]
+            global_access = re.search(
+                r'(global|window|globalThis|this)\s*\[\s*(\w+)\.(?:split|reverse|join|charAt|substring|slice)',
+                line
+            )
+            if global_access:
+                self._add_finding(i, "Code Injection - Dynamic global access with string manipulation",
+                                  VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH",
+                                  f"Dynamic property access on {global_access.group(1)} with string manipulation. "
+                                  "Likely obfuscated eval/Function access.")
+
+            # Pattern 3: .split("").reverse().join("") pattern
+            if re.search(r'\.split\s*\(\s*["\']["\']?\s*\)\s*\.reverse\s*\(\s*\)\s*\.join\s*\(\s*["\']["\']?\s*\)', line):
+                self._add_finding(i, "Code Injection - String reversal pattern",
+                                  VulnCategory.CODE_INJECTION, Severity.HIGH, "HIGH",
+                                  "String reversal pattern detected. Often used to obfuscate dangerous function names.")
+
+            # Pattern 4: Variable assigned from global[...] then called
+            # const checker = global[...]; then checker(...)
+            var_from_global = re.search(
+                r'(?:const|let|var)\s+(\w+)\s*=\s*(?:global|window|globalThis)\s*\[',
+                line
+            )
+            if var_from_global:
+                shadow_vars[var_from_global.group(1)] = i
+
+            # Pattern 5: Check if a shadow variable is being called as a function
+            for var_name, def_line in shadow_vars.items():
+                if re.search(rf'\b{re.escape(var_name)}\s*\(', line) and i != def_line:
+                    self._add_finding(i, "Code Injection - Shadow function invocation",
+                                      VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH",
+                                      f"Variable '{var_name}' (assigned from global object at line {def_line}) "
+                                      "is being called as a function. Likely obfuscated eval/Function.")
+
+            # Pattern 6: Indirect eval via (0, eval) or (1, eval)
+            if re.search(r'\(\s*\d+\s*,\s*eval\s*\)', line):
+                self._add_finding(i, "Code Injection - Indirect eval invocation",
+                                  VulnCategory.CODE_INJECTION, Severity.HIGH, "HIGH",
+                                  "Indirect eval pattern (0, eval) used to change execution context.")
+
+            # Pattern 7: eval accessed via globalThis/window/global bracket notation
+            if re.search(r'(?:global|window|globalThis)\s*\[\s*["\']eval["\']\s*\]', line):
+                self._add_finding(i, "Code Injection - eval via bracket notation",
+                                  VulnCategory.CODE_INJECTION, Severity.HIGH, "HIGH",
+                                  "eval accessed via bracket notation on global object.")
+
     def _check_command_injection(self):
         """Check for command injection - including evasion techniques."""
         # Direct patterns
