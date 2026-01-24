@@ -969,32 +969,7 @@ class PythonTaintTracker(ast.NodeVisitor):
             return node.s
         return None
 
-    def visit_Compare(self, node: ast.Compare):
-        """Check for weak password comparisons."""
-        # Detect patterns like: password == user_input
-        if len(node.ops) == 1 and isinstance(node.ops[0], ast.Eq):
-            left_name = self._get_name(node.left)
 
-            if left_name and any(kw in left_name.lower() for kw in ['password', 'passwd', 'pwd', 'secret', 'token']):
-                if node.comparators:
-                    tainted, source = self.is_tainted(node.comparators[0])
-                    # This is actually expected - comparing password to user input
-                    # But we should flag == instead of constant-time comparison
-                    self.add_finding(
-                        node, "Auth Bypass - Timing-unsafe password comparison",
-                        VulnCategory.AUTH_BYPASS, Severity.LOW, "LOW",
-                        description="Use hmac.compare_digest() for constant-time comparison."
-                    )
-
-        self.generic_visit(node)
-
-    def _get_name(self, node: ast.AST) -> Optional[str]:
-        """Get a simple name from a node."""
-        if isinstance(node, ast.Name):
-            return node.id
-        elif isinstance(node, ast.Attribute):
-            return node.attr
-        return None
 
     def _check_evasion_patterns(self):
         """Check for code evasion patterns that bypass standard detection."""

@@ -46,8 +46,7 @@ A cross-platform static analysis toolkit for detecting security vulnerabilities 
 **Fast pattern-based detection**
 
 - High-speed scanning
-- Binary/DLL analysis support
-- JAR/APK/WAR archive scanning
+- Binary & DLL analysis
 - .NET decompilation (ILSpy)
 - Broad pattern coverage
 
@@ -404,7 +403,7 @@ Options:
   -c, --category CATEGORY   Filter by category
   --output {text,json}      Output format
   -o, --output-file FILE    Save report to file
-  --scan-binaries, -b       Enable binary analysis (DLL/EXE/JAR)
+  --scan-binaries, -b       Enable binary/DLL analysis
   --decompile, -d           Decompile .NET with ILSpy/dnSpy
 ```
 
@@ -436,8 +435,7 @@ Options:
 | **Accuracy** | Higher | Lower |
 | **Taint Tracking** | Yes | No |
 | **Confidence Scores** | Yes | No |
-| **Binary Analysis** | No | Yes |
-| **Archive Scanning** | No | Yes (JAR/APK/WAR) |
+| **Binary/DLL Analysis** | No | Yes |
 | **.NET Decompile** | No | Yes |
 | **Python Analysis** | Full AST | Regex |
 | **Best For** | Code review | CI/CD, quick scans |
