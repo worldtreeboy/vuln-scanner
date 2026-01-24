@@ -1596,12 +1596,23 @@ class JavaScriptAnalyzer:
     def _identify_taint_sources(self):
         """Identify variables that hold user input."""
         taint_patterns = [
-            r'(\w+)\s*=\s*req\.(body|query|params|cookies|headers)',
-            r'(\w+)\s*=\s*request\.(body|query|params)',
+            # Express.js patterns - with property access (req.query.id, req.body.name, etc.)
+            r'(?:const|let|var)\s+(\w+)\s*=\s*req\.(body|query|params|cookies|headers)(?:\.\w+|\[[\'"][^\]]+[\'"]\])?',
+            r'(\w+)\s*=\s*req\.(body|query|params|cookies|headers)(?:\.\w+|\[[\'"][^\]]+[\'"]\])?',
+            # Direct req property access
+            r'(\w+)\s*=\s*request\.(body|query|params)(?:\.\w+|\[[\'"][^\]]+[\'"]\])?',
+            # Destructuring
             r'const\s+\{([^}]+)\}\s*=\s*req\.(body|query|params)',
             r'let\s+\{([^}]+)\}\s*=\s*req\.(body|query|params)',
+            # Process argv
             r'(\w+)\s*=\s*process\.argv',
+            # Browser DOM sources
             r'(\w+)\s*=\s*document\.(location|URL|referrer|cookie)',
+            r'(\w+)\s*=\s*window\.location',
+            r'(\w+)\s*=\s*location\.(href|search|hash|pathname)',
+            # URL/URLSearchParams
+            r'(\w+)\s*=\s*(?:new\s+)?URL(?:SearchParams)?\s*\(',
+            r'(\w+)\s*=\s*\w+\.(?:get|getAll)\s*\(',
         ]
 
         for pattern in taint_patterns:
@@ -1613,6 +1624,38 @@ class JavaScriptAnalyzer:
                     self.tainted_vars.update(vars_list)
                 else:
                     self.tainted_vars.add(var_name)
+
+        # Second pass: Track taint propagation through assignments
+        self._track_taint_propagation()
+
+    def _track_taint_propagation(self):
+        """Track taint propagation through variable assignments."""
+        # Multiple passes to handle chained assignments
+        for _ in range(3):
+            for i, line in enumerate(self.source_lines, 1):
+                stripped = line.strip()
+                if stripped.startswith('//') or stripped.startswith('/*'):
+                    continue
+
+                # Match variable assignments: const/let/var x = ... or x = ...
+                assign_match = re.search(r'(?:const|let|var)\s+(\w+)\s*=\s*(.+?)(?:;|$)', line)
+                if not assign_match:
+                    assign_match = re.search(r'^(\w+)\s*=\s*(.+?)(?:;|$)', stripped)
+
+                if assign_match:
+                    var_name = assign_match.group(1)
+                    rhs = assign_match.group(2)
+
+                    # Check if RHS contains any tainted variable
+                    for tainted_var in list(self.tainted_vars):
+                        # Check for direct use or template literal interpolation
+                        if re.search(rf'\b{re.escape(tainted_var)}\b', rhs):
+                            self.tainted_vars.add(var_name)
+                            break
+                        # Check template literal: `...${taintedVar}...`
+                        if re.search(rf'\$\{{\s*{re.escape(tainted_var)}\s*\}}', rhs):
+                            self.tainted_vars.add(var_name)
+                            break
 
     def get_line_content(self, lineno: int) -> str:
         """Get the source line content."""
@@ -1978,6 +2021,26 @@ class JavaScriptAnalyzer:
                     self._add_finding(i, "Command Injection - spawn with shell:true",
                                       VulnCategory.COMMAND_INJECTION, Severity.HIGH, "HIGH",
                                       "spawn() with shell:true allows command injection.")
+
+            # Check for exec/execSync with tainted variable arguments
+            # Pattern: .exec(varName, ...) or .execSync(varName, ...)
+            exec_var_match = re.search(r'\.exec(?:Sync)?\s*\(\s*(\w+)', line)
+            if exec_var_match:
+                arg_var = exec_var_match.group(1)
+                # Check if the variable passed to exec is tainted
+                if arg_var in self.tainted_vars:
+                    self._add_finding(i, "Command Injection - exec with tainted variable",
+                                      VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, "HIGH",
+                                      f"Tainted variable '{arg_var}' passed to shell execution function.")
+                else:
+                    # Check if this looks like a child_process usage
+                    context = '\n'.join(self.source_lines[max(0, i-10):i+1])
+                    if re.search(r'require\s*\(\s*["\']child_process["\']\s*\)', context):
+                        # It's a child_process exec - check broader taint context
+                        if any(var in context for var in self.tainted_vars):
+                            self._add_finding(i, "Command Injection - exec with potentially tainted data",
+                                              VulnCategory.COMMAND_INJECTION, Severity.HIGH, "MEDIUM",
+                                              f"exec() called in context with tainted variables.")
 
     def _check_sql_injection(self):
         """Check for SQL injection patterns - including evasion techniques."""
