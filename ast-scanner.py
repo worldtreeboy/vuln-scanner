@@ -4087,6 +4087,7 @@ class CSharpAnalyzer:
         self._check_xpath_injection()
         self._check_ssrf()
         self._check_ssti()
+        self._check_viewstate_vulnerabilities()
         return self.findings
 
     def _add_finding(self, line_num: int, vuln_name: str, category: VulnCategory,
@@ -4611,6 +4612,107 @@ class CSharpAnalyzer:
                                                   VulnCategory.SSTI, Severity.CRITICAL, "HIGH", var,
                                                   "User-controlled template passed to template engine. RCE possible.")
                                 break
+
+    def _check_viewstate_vulnerabilities(self):
+        """
+        Detect ASP.NET ViewState security misconfigurations.
+
+        ViewState is a mechanism to persist page state across postbacks. When improperly
+        configured, it can lead to:
+        1. Deserialization attacks (EnableViewStateMac = false)
+        2. Information disclosure (ViewStateEncryptionMode = Never)
+
+        These are global configuration risks regardless of where they appear in code.
+        """
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+
+            # Pattern 1: EnableViewStateMac = false (CRITICAL - Deserialization)
+            # Can appear as: this.EnableViewStateMac = false; Page.EnableViewStateMac = false;
+            # Or in Page directive: <%@ Page EnableViewStateMac="false" %>
+            enablemac_match = re.search(
+                r'EnableViewStateMac\s*=\s*(?:false|"false"|False|"False")',
+                line, re.IGNORECASE
+            )
+            if enablemac_match:
+                # Determine context (code-behind vs directive)
+                is_directive = '<%@' in line or '<%@' in '\n'.join(self.source_lines[max(0, i-2):i])
+                context_type = "Page directive" if is_directive else "Code assignment"
+
+                self._add_finding(
+                    i,
+                    "Insecure Deserialization - ViewState MAC Disabled",
+                    VulnCategory.DESERIALIZATION,
+                    Severity.CRITICAL,
+                    "HIGH",
+                    description=f"{context_type}: EnableViewStateMac=false allows ViewState tampering. "
+                    "Attackers can craft malicious ViewState payloads for RCE via deserialization gadgets "
+                    "(e.g., ObjectDataProvider, TypeConfuseDelegate). This is exploitable with ysoserial.net."
+                )
+
+            # Pattern 2: ViewStateEncryptionMode = Never (HIGH - Auth/Information Disclosure)
+            # Can appear as: ViewStateEncryptionMode = ViewStateEncryptionMode.Never
+            # Or: Page.ViewStateEncryptionMode = ViewStateEncryptionMode.Never
+            encryption_match = re.search(
+                r'ViewStateEncryptionMode\s*=\s*(?:ViewStateEncryptionMode\.)?Never',
+                line, re.IGNORECASE
+            )
+            if encryption_match:
+                is_directive = '<%@' in line or '<%@' in '\n'.join(self.source_lines[max(0, i-2):i])
+                context_type = "Page directive" if is_directive else "Code assignment"
+
+                self._add_finding(
+                    i,
+                    "Authentication Bypass - ViewState Encryption Disabled",
+                    VulnCategory.AUTH_BYPASS,
+                    Severity.HIGH,
+                    "HIGH",
+                    description=f"{context_type}: ViewStateEncryptionMode=Never exposes ViewState contents. "
+                    "Attackers can decode and read sensitive data stored in ViewState, potentially "
+                    "bypassing authentication or extracting secrets."
+                )
+
+            # Pattern 3: ViewStateUserKey not set (when EnableViewState is used)
+            # This enables CSRF attacks via ViewState
+            if re.search(r'EnableViewState\s*=\s*(?:true|"true")', line, re.IGNORECASE):
+                # Check if ViewStateUserKey is set in the file
+                full_source = '\n'.join(self.source_lines)
+                if not re.search(r'ViewStateUserKey\s*=', full_source, re.IGNORECASE):
+                    self._add_finding(
+                        i,
+                        "CSRF via ViewState - ViewStateUserKey Not Set",
+                        VulnCategory.AUTH_BYPASS,
+                        Severity.MEDIUM,
+                        "MEDIUM",
+                        description="EnableViewState=true without ViewStateUserKey allows CSRF attacks. "
+                        "Set ViewStateUserKey to Session.SessionID in Page_Init to prevent ViewState reuse."
+                    )
+
+            # Pattern 4: MachineKey validation/decryption in web.config style
+            # <machineKey validation="None" /> or validationKey="AutoGenerate"
+            if re.search(r'machineKey.*validation\s*=\s*["\']?None', line, re.IGNORECASE):
+                self._add_finding(
+                    i,
+                    "Insecure Deserialization - MachineKey Validation Disabled",
+                    VulnCategory.DESERIALIZATION,
+                    Severity.CRITICAL,
+                    "HIGH",
+                    description="MachineKey validation=None disables ViewState integrity checks. "
+                    "This allows arbitrary ViewState manipulation and deserialization attacks."
+                )
+
+            # Pattern 5: pages enableViewStateMac="false" in config
+            if re.search(r'<pages[^>]*enableViewStateMac\s*=\s*["\']false["\']', line, re.IGNORECASE):
+                self._add_finding(
+                    i,
+                    "Insecure Deserialization - Global ViewState MAC Disabled",
+                    VulnCategory.DESERIALIZATION,
+                    Severity.CRITICAL,
+                    "HIGH",
+                    description="Web.config disables ViewState MAC globally. All pages are vulnerable "
+                    "to ViewState deserialization attacks. This is a server-wide RCE vector."
+                )
 
 
 class GoAnalyzer:
