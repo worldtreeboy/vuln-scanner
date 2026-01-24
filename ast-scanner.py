@@ -3360,6 +3360,108 @@ class JavaScriptAnalyzer:
                                       VulnCategory.XSS, Severity.HIGH, "MEDIUM",
                                       "DOM element accessed, then manipulated via bracket notation.")
 
+            # ===== PATTERN 9: Sanitization Bypass Detection =====
+            # Detect weak/incomplete sanitization that can be bypassed
+
+            # 9a: .replace() without global flag - only replaces FIRST occurrence
+            # Pattern: str.replace("<script>", "") or str.replace(/<script>/i, "")
+            replace_match = re.search(r'\.replace\s*\(\s*(["\'/])([^"\'\/]+)\1\s*,', line)
+            if replace_match:
+                replaced_str = replace_match.group(2)
+                # Check if it's replacing dangerous patterns without global flag
+                dangerous_tags = ['script', 'iframe', 'object', 'embed', 'svg', 'img', 'on\\w+']
+                for tag in dangerous_tags:
+                    if re.search(tag, replaced_str, re.IGNORECASE):
+                        # Check if it's a string (not regex with /g)
+                        if replace_match.group(1) in ['"', "'"]:
+                            self._add_finding(i, "Sanitization Bypass - .replace() without global flag",
+                                              VulnCategory.XSS, Severity.HIGH, "HIGH",
+                                              f"String.replace() only removes FIRST occurrence. "
+                                              f"Input '<script><script>' becomes '<script>' after sanitization.")
+                        # Check regex without 'g' flag
+                        elif replace_match.group(1) == '/' and not re.search(r'/[gimsuy]*g', line):
+                            self._add_finding(i, "Sanitization Bypass - RegExp.replace() without /g flag",
+                                              VulnCategory.XSS, Severity.HIGH, "HIGH",
+                                              "RegExp replace without global flag. Only first match removed.")
+
+            # 9b: Incomplete tag sanitization (only removes <script> but not event handlers)
+            if re.search(r'\.replace\s*\([^)]*(?:script|iframe)[^)]*\)', line, re.IGNORECASE):
+                # Check if followed by innerHTML assignment
+                context = '\n'.join(self.source_lines[i-1:min(len(self.source_lines), i+5)])
+                if re.search(r'innerHTML|outerHTML|document\.write|\.html\s*\(', context):
+                    if not re.search(r'onerror|onload|onclick|onmouse|onfocus|onblur', line, re.IGNORECASE):
+                        self._add_finding(i, "Sanitization Bypass - Incomplete tag filtering",
+                                          VulnCategory.XSS, Severity.HIGH, "HIGH",
+                                          "Only filtering <script> tags. Event handlers (onerror, onload) "
+                                          "and other vectors (<img src=x onerror=...>) still work.")
+
+            # 9c: Case-sensitive sanitization bypass
+            # Check for replace without 'i' flag on dangerous patterns
+            case_sensitive = re.search(r'\.replace\s*\(\s*/([^/]+)/([^,]*),', line)
+            if case_sensitive:
+                pattern = case_sensitive.group(1)
+                flags = case_sensitive.group(2)
+                if any(tag in pattern.lower() for tag in ['script', 'iframe', 'img', 'svg']):
+                    if 'i' not in flags:
+                        self._add_finding(i, "Sanitization Bypass - Case-sensitive filter",
+                                          VulnCategory.XSS, Severity.HIGH, "HIGH",
+                                          f"RegExp /{pattern}/ is case-sensitive. "
+                                          f"<SCRIPT> or <ScRiPt> bypasses filter. Add 'i' flag.")
+
+            # 9d: Blacklist-based sanitization (fundamentally flawed)
+            blacklist_patterns = [
+                r'\.replace\s*\([^)]*(?:script|alert|javascript)[^)]*\)',
+                r'\.filter\s*\([^)]*(?:script|alert)[^)]*\)',
+                r'\.indexOf\s*\([^)]*(?:script|alert)[^)]*\)\s*[!=]=',
+                r'\.includes\s*\([^)]*(?:<script|javascript:)[^)]*\)',
+            ]
+            for bp in blacklist_patterns:
+                if re.search(bp, line, re.IGNORECASE):
+                    context = '\n'.join(self.source_lines[i-1:min(len(self.source_lines), i+5)])
+                    if re.search(r'innerHTML|outerHTML|document\.write|\.html\s*\(|eval|Function', context):
+                        self._add_finding(i, "Sanitization Bypass - Blacklist-based filtering",
+                                          VulnCategory.XSS, Severity.CRITICAL, "HIGH",
+                                          "Blacklist sanitization is fundamentally flawed. "
+                                          "Countless bypass vectors exist: <img onerror>, <svg onload>, "
+                                          "data: URLs, mutation XSS, etc. Use allowlist or proper encoding.")
+
+            # 9e: Double encoding / recursive sanitization needed
+            if re.search(r'\.replace\s*\([^)]+\)\s*;?\s*$', line):
+                # Single replace at end of statement
+                context = '\n'.join(self.source_lines[i-1:min(len(self.source_lines), i+3)])
+                if re.search(r'innerHTML|outerHTML|document\.write', context):
+                    # Check if there's a loop or multiple replacements
+                    if not re.search(r'while|for|\.replace\s*\([^)]+\)\s*\.replace', context):
+                        if re.search(r'<|>|script|&lt;|&gt;', line, re.IGNORECASE):
+                            self._add_finding(i, "Sanitization Bypass - Non-recursive sanitization",
+                                              VulnCategory.XSS, Severity.HIGH, "MEDIUM",
+                                              "Single-pass sanitization. Nested payloads like "
+                                              "'<scr<script>ipt>' become '<script>' after one pass.")
+
+            # 9f: Dangerous sanitization that creates new vectors
+            # e.g., removing 'javascript' from 'javjavascriptascript:' leaves 'javascript:'
+            if re.search(r'\.replace\s*\(\s*["\']javascript["\']\s*,\s*["\']["\']', line, re.IGNORECASE):
+                self._add_finding(i, "Sanitization Bypass - Nested payload vulnerability",
+                                  VulnCategory.XSS, Severity.CRITICAL, "HIGH",
+                                  "Removing 'javascript' from 'javjavascriptascript:' "
+                                  "creates 'javascript:'. Use recursive or allowlist approach.")
+
+            # 9g: HTML entity encoding bypass
+            if re.search(r'\.replace\s*\([^)]*&lt;[^)]*\)', line):
+                self._add_finding(i, "Sanitization Bypass - HTML entity mismatch",
+                                  VulnCategory.XSS, Severity.MEDIUM, "MEDIUM",
+                                  "Filtering HTML entities but input may not be entity-encoded. "
+                                  "Or vice versa: entities bypass raw character filters.")
+
+            # 9h: Prototype pollution enabling XSS
+            if re.search(r'Object\.assign\s*\([^)]*\)|Object\.setPrototypeOf|__proto__|\.prototype\s*=', line):
+                context = '\n'.join(self.source_lines[max(0, i-5):min(len(self.source_lines), i+5)])
+                if re.search(r'innerHTML|outerHTML|src|href|on\w+\s*=', context):
+                    self._add_finding(i, "Sanitization Bypass - Prototype pollution to XSS",
+                                      VulnCategory.XSS, Severity.CRITICAL, "HIGH",
+                                      "Prototype pollution can override sanitization functions "
+                                      "or inject properties that become XSS vectors.")
+
 
 class JavaAnalyzer:
     """

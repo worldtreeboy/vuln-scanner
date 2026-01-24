@@ -420,6 +420,53 @@ const run = window[decode(_0x9922)];  // run = eval
 run(`document.body.${sink} = "${data}"`);
 ```
 
+### Sanitization Bypass Detection
+
+Detects flawed sanitization that can be bypassed:
+
+**First Occurrence Only (No Global Flag)**
+```javascript
+// DETECTED: .replace() only removes FIRST occurrence
+let sanitized = input.replace("<script>", "");
+// Input: "<script><script>alert(1)" → Output: "<script>alert(1)"
+document.body.innerHTML = sanitized;
+```
+
+**Case-Sensitive Filters**
+```javascript
+// DETECTED: Missing 'i' flag - <SCRIPT> or <ScRiPt> bypasses
+let clean = input.replace(/<script>/g, "");
+```
+
+**Blacklist-Based Sanitization**
+```javascript
+// DETECTED: Fundamentally flawed approach
+if (input.includes("<script>") || input.includes("javascript:")) {
+    return "blocked";
+}
+// Bypassed by: <img onerror=...>, <svg onload=...>, data: URLs
+```
+
+**Nested Payload Vulnerability**
+```javascript
+// DETECTED: Removing "javascript" creates new vector
+let url = "javjavascriptascript:alert(1)";
+let safe = url.replace("javascript", "");  // → "javascript:alert(1)"
+```
+
+**Non-Recursive Sanitization**
+```javascript
+// DETECTED: Single-pass sanitization
+let clean = input.replace("<script>", "");
+// Input: "<scr<script>ipt>" → Output: "<script>"
+```
+
+**Prototype Pollution to XSS**
+```javascript
+// DETECTED: __proto__ can override sanitization
+Object.assign({}, userConfig);  // userConfig may contain __proto__
+```
+
 ### C# Destructor/Finalizer Command Injection
 
 Detects the "Bomb" pattern where command injection is hidden in destructors for delayed execution:
@@ -720,6 +767,7 @@ vuln-scanner/
 ├── README.md           # Documentation
 ├── LICENSE             # MIT License
 └── test-files/         # Sample vulnerable configurations for testing
+    ├── sanitization-bypass.js        # JavaScript - Weak sanitization patterns
     ├── evasive-xss.js                # JavaScript - Advanced evasion patterns
     ├── xss-test.js                   # JavaScript - DOM-based & Reflected XSS
     ├── xss-test.php                  # PHP - Superglobal & tainted XSS
@@ -740,6 +788,7 @@ The `test-files/` directory contains **intentionally vulnerable** configuration 
 
 | File | Framework | Key Vulnerabilities |
 |------|-----------|---------------------|
+| `sanitization-bypass.js` | JavaScript | Weak replace(), blacklist filters, nested payloads |
 | `evasive-xss.js` | JavaScript | ASCII encoding, prototype abuse, async taint, eval aliasing |
 | `xss-test.js` | JavaScript | DOM-based XSS, Reflected XSS, jQuery, React, Angular, Vue |
 | `xss-test.php` | PHP | Direct superglobal output, tainted variable XSS |
