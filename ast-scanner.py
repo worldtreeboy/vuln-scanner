@@ -70,6 +70,10 @@ class VulnCategory(Enum):
     PATH_TRAVERSAL = "Path Traversal"
     LFI_RFI = "Local/Remote File Inclusion"
     LDAP_INJECTION = "LDAP Injection"
+    XSS = "Cross-Site Scripting"
+    INFO_DISCLOSURE = "Information Disclosure"
+    WEAK_CRYPTO = "Weak Cryptography"
+    SESSION_FIXATION = "Session Fixation"
 
 
 @dataclass
@@ -4715,6 +4719,191 @@ class CSharpAnalyzer:
                 )
 
 
+class ASPNetConfigAnalyzer:
+    """
+    ASP.NET web.config analyzer for security misconfigurations.
+    Detects global settings that affect application security.
+    """
+
+    def __init__(self, source_code: str, file_path: str):
+        self.source_code = source_code
+        self.source_lines = source_code.splitlines()
+        self.file_path = file_path
+        self.findings: List[Finding] = []
+
+    def get_line_content(self, lineno: int) -> str:
+        if 1 <= lineno <= len(self.source_lines):
+            return self.source_lines[lineno - 1]
+        return ""
+
+    def analyze(self) -> List[Finding]:
+        self._check_viewstate_settings()
+        self._check_authentication_settings()
+        self._check_debug_settings()
+        self._check_request_validation()
+        self._check_session_settings()
+        self._check_custom_errors()
+        return self.findings
+
+    def _add_finding(self, line_num: int, vuln_name: str, category: VulnCategory,
+                     severity: Severity, confidence: str, description: str = ""):
+        self.findings.append(Finding(
+            file_path=self.file_path, line_number=line_num, col_offset=0,
+            line_content=self.get_line_content(line_num),
+            vulnerability_name=vuln_name, category=category,
+            severity=severity, confidence=confidence,
+            taint_chain=[], description=description,
+        ))
+
+    def _check_viewstate_settings(self):
+        """Check for ViewState security misconfigurations."""
+        for i, line in enumerate(self.source_lines, 1):
+            # CRITICAL: enableViewStateMac="false"
+            if re.search(r'enableViewStateMac\s*=\s*["\']false["\']', line, re.IGNORECASE):
+                self._add_finding(
+                    i, "Insecure Deserialization - Global ViewState MAC Disabled",
+                    VulnCategory.DESERIALIZATION, Severity.CRITICAL, "HIGH",
+                    "web.config disables ViewState MAC globally. ALL pages vulnerable to "
+                    "deserialization attacks via ysoserial.net gadgets (ObjectDataProvider, TypeConfuseDelegate)."
+                )
+
+            # HIGH: viewStateEncryptionMode="Never"
+            if re.search(r'viewStateEncryptionMode\s*=\s*["\']Never["\']', line, re.IGNORECASE):
+                self._add_finding(
+                    i, "Authentication Bypass - Global ViewState Encryption Disabled",
+                    VulnCategory.AUTH_BYPASS, Severity.HIGH, "HIGH",
+                    "web.config disables ViewState encryption globally. Sensitive data in ViewState is exposed."
+                )
+
+            # CRITICAL: machineKey validation="None"
+            if re.search(r'<machineKey[^>]*validation\s*=\s*["\']None["\']', line, re.IGNORECASE):
+                self._add_finding(
+                    i, "Insecure Deserialization - MachineKey Validation Disabled",
+                    VulnCategory.DESERIALIZATION, Severity.CRITICAL, "HIGH",
+                    "MachineKey validation=None disables ALL cryptographic validation. "
+                    "ViewState, Forms Auth tickets, and other tokens can be forged."
+                )
+
+            # HIGH: machineKey with weak validation (MD5/SHA1 without HMAC)
+            if re.search(r'<machineKey[^>]*validation\s*=\s*["\'](MD5|SHA1)["\']', line, re.IGNORECASE):
+                match = re.search(r'validation\s*=\s*["\'](MD5|SHA1)["\']', line, re.IGNORECASE)
+                self._add_finding(
+                    i, f"Weak Cryptography - MachineKey uses {match.group(1)}",
+                    VulnCategory.AUTH_BYPASS, Severity.MEDIUM, "HIGH",
+                    f"MachineKey validation={match.group(1)} uses weak algorithm. Use HMACSHA256 or higher."
+                )
+
+    def _check_authentication_settings(self):
+        """Check for authentication security misconfigurations."""
+        for i, line in enumerate(self.source_lines, 1):
+            # HIGH: Forms auth protection="None"
+            if re.search(r'<forms[^>]*protection\s*=\s*["\']None["\']', line, re.IGNORECASE):
+                self._add_finding(
+                    i, "Authentication Bypass - Forms Auth Protection Disabled",
+                    VulnCategory.AUTH_BYPASS, Severity.CRITICAL, "HIGH",
+                    "Forms authentication protection=None disables ticket encryption AND validation. "
+                    "Attackers can forge authentication tickets."
+                )
+
+            # HIGH: requireSSL="false" on forms auth
+            if re.search(r'<forms[^>]*requireSSL\s*=\s*["\']false["\']', line, re.IGNORECASE):
+                self._add_finding(
+                    i, "Authentication Bypass - Forms Auth Cookies Over HTTP",
+                    VulnCategory.AUTH_BYPASS, Severity.HIGH, "HIGH",
+                    "Forms authentication cookies sent over HTTP. Vulnerable to session hijacking via MITM."
+                )
+
+            # HIGH: cookieless="UseUri" or "true" enables session fixation
+            if re.search(r'<forms[^>]*cookieless\s*=\s*["\'](UseUri|true)["\']', line, re.IGNORECASE):
+                self._add_finding(
+                    i, "Session Fixation - Cookieless Forms Authentication",
+                    VulnCategory.AUTH_BYPASS, Severity.HIGH, "HIGH",
+                    "Cookieless auth embeds session in URL. Enables session fixation and leakage via Referer."
+                )
+
+    def _check_debug_settings(self):
+        """Check for debug mode in production."""
+        for i, line in enumerate(self.source_lines, 1):
+            # HIGH: compilation debug="true"
+            if re.search(r'<compilation[^>]*debug\s*=\s*["\']true["\']', line, re.IGNORECASE):
+                self._add_finding(
+                    i, "Information Disclosure - Debug Mode Enabled",
+                    VulnCategory.INFO_DISCLOSURE, Severity.HIGH, "HIGH",
+                    "Debug mode exposes detailed error messages, stack traces, and compilation info. "
+                    "Disable in production: debug=\"false\""
+                )
+
+            # HIGH: trace enabled
+            if re.search(r'<trace[^>]*enabled\s*=\s*["\']true["\']', line, re.IGNORECASE):
+                self._add_finding(
+                    i, "Information Disclosure - Trace Enabled",
+                    VulnCategory.INFO_DISCLOSURE, Severity.HIGH, "HIGH",
+                    "ASP.NET trace exposes request details, session data, and application variables."
+                )
+
+    def _check_request_validation(self):
+        """Check for request validation settings."""
+        for i, line in enumerate(self.source_lines, 1):
+            # MEDIUM: requestValidationMode="2.0" disables modern validation
+            if re.search(r'requestValidationMode\s*=\s*["\']2\.0["\']', line, re.IGNORECASE):
+                self._add_finding(
+                    i, "XSS - Request Validation Weakened",
+                    VulnCategory.XSS, Severity.MEDIUM, "MEDIUM",
+                    "requestValidationMode=2.0 uses legacy validation that only protects .aspx pages. "
+                    "Modern apps should use 4.5+ validation or implement custom sanitization."
+                )
+
+            # MEDIUM: validateRequest="false"
+            if re.search(r'validateRequest\s*=\s*["\']false["\']', line, re.IGNORECASE):
+                self._add_finding(
+                    i, "XSS - Request Validation Disabled",
+                    VulnCategory.XSS, Severity.MEDIUM, "HIGH",
+                    "Request validation disabled. Application must implement custom input sanitization."
+                )
+
+    def _check_session_settings(self):
+        """Check for session security misconfigurations."""
+        for i, line in enumerate(self.source_lines, 1):
+            # HIGH: cookieless sessions
+            if re.search(r'<sessionState[^>]*cookieless\s*=\s*["\'](true|UseUri)["\']', line, re.IGNORECASE):
+                self._add_finding(
+                    i, "Session Fixation - Cookieless Sessions",
+                    VulnCategory.AUTH_BYPASS, Severity.HIGH, "HIGH",
+                    "Cookieless sessions embed session ID in URL. Vulnerable to session fixation and leakage."
+                )
+
+            # MEDIUM: session timeout too long
+            timeout_match = re.search(r'<sessionState[^>]*timeout\s*=\s*["\'](\d+)["\']', line, re.IGNORECASE)
+            if timeout_match:
+                timeout = int(timeout_match.group(1))
+                if timeout > 60:
+                    self._add_finding(
+                        i, "Session Security - Long Session Timeout",
+                        VulnCategory.AUTH_BYPASS, Severity.LOW, "MEDIUM",
+                        f"Session timeout of {timeout} minutes is excessive. Consider 20-30 minutes for sensitive apps."
+                    )
+
+    def _check_custom_errors(self):
+        """Check for custom errors configuration."""
+        for i, line in enumerate(self.source_lines, 1):
+            # HIGH: customErrors mode="Off"
+            if re.search(r'<customErrors[^>]*mode\s*=\s*["\']Off["\']', line, re.IGNORECASE):
+                self._add_finding(
+                    i, "Information Disclosure - Custom Errors Disabled",
+                    VulnCategory.INFO_DISCLOSURE, Severity.HIGH, "HIGH",
+                    "customErrors=Off exposes detailed error messages and stack traces to users. "
+                    "Use mode=\"RemoteOnly\" or \"On\" in production."
+                )
+
+            # MEDIUM: directory browsing enabled
+            if re.search(r'<directoryBrowse[^>]*enabled\s*=\s*["\']true["\']', line, re.IGNORECASE):
+                self._add_finding(
+                    i, "Information Disclosure - Directory Browsing Enabled",
+                    VulnCategory.INFO_DISCLOSURE, Severity.MEDIUM, "HIGH",
+                    "Directory browsing exposes file structure. Attackers can enumerate files and find sensitive data."
+                )
+
+
 class GoAnalyzer:
     """
     Go analyzer with taint tracking for common vulnerabilities.
@@ -5220,6 +5409,9 @@ class ASTScanner:
         '.php5': 'php',
         '.phtml': 'php',
         '.cs': 'csharp',
+        '.config': 'aspnet_config',
+        '.aspx': 'csharp',
+        '.ascx': 'csharp',
         '.go': 'go',
         '.rb': 'ruby',
         '.erb': 'ruby',
@@ -5284,6 +5476,8 @@ class ASTScanner:
                 findings = self._scan_php(source_code, str(file_path))
             elif lang == 'csharp':
                 findings = self._scan_csharp(source_code, str(file_path))
+            elif lang == 'aspnet_config':
+                findings = self._scan_aspnet_config(source_code, str(file_path))
             elif lang == 'go':
                 findings = self._scan_go(source_code, str(file_path))
             elif lang == 'ruby':
@@ -5331,6 +5525,12 @@ class ASTScanner:
     def _scan_csharp(self, source_code: str, file_path: str) -> List[Finding]:
         """Scan C# source code."""
         analyzer = CSharpAnalyzer(source_code, file_path)
+        findings = analyzer.analyze()
+        return self._filter_findings(findings)
+
+    def _scan_aspnet_config(self, source_code: str, file_path: str) -> List[Finding]:
+        """Scan ASP.NET web.config files."""
+        analyzer = ASPNetConfigAnalyzer(source_code, file_path)
         findings = analyzer.analyze()
         return self._filter_findings(findings)
 
