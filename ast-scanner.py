@@ -5128,14 +5128,38 @@ class CSharpAnalyzer:
 
             for pattern in sql_patterns:
                 if re.search(pattern, line):
-                    is_tainted, taint_var = self._is_tainted(line)
-                    has_concat = '+' in line or '$"' in line or 'String.Format' in line
+                    # Check if this uses parameterized query placeholders (@param)
+                    has_param_placeholder = bool(re.search(r'@\w+', line))
 
-                    if is_tainted:
+                    # Look ahead for Parameters.AddWithValue or Parameters.Add (within next 15 lines)
+                    context_window = 15
+                    end_idx = min(i + context_window, len(self.source_lines))
+                    context_lines = self.source_lines[i-1:end_idx]
+                    has_param_add = any(re.search(r'\.Parameters\s*\.\s*(Add|AddWithValue)\s*\(', ctx_line)
+                                        for ctx_line in context_lines)
+
+                    is_tainted, taint_var = self._is_tainted(line)
+
+                    # Detect unsafe string building patterns
+                    # - String concatenation with quotes: "SELECT " + var
+                    # - Interpolated strings: $"SELECT {var}"
+                    # - String.Format: string.Format("SELECT {0}", var)
+                    has_string_concat = bool(re.search(r'["\'].*\+|\+.*["\']', line))
+                    has_interpolation = '$"' in line or '$@"' in line
+                    has_string_format = bool(re.search(r'[Ss]tring\.Format\s*\(', line))
+                    has_unsafe_concat = has_string_concat or has_interpolation or has_string_format
+
+                    # If using @param placeholders AND Parameters.Add, it's safe parameterized query
+                    if has_param_placeholder and has_param_add and not has_unsafe_concat:
+                        continue  # Safe - skip this line
+
+                    # CRITICAL: Tainted data with unsafe concatenation (definite SQLi)
+                    if is_tainted and has_unsafe_concat:
                         self._add_finding(i, "SQL Injection - SqlCommand with tainted data",
                                           VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
-                                          "User input in SQL command.")
-                    elif has_concat and re.search(sql_keywords, line, re.IGNORECASE):
+                                          "User input concatenated into SQL command.")
+                    # HIGH: Has unsafe concat with SQL keywords but no detected taint
+                    elif has_unsafe_concat and re.search(sql_keywords, line, re.IGNORECASE):
                         self._add_finding(i, "SQL Injection - Dynamic query construction",
                                           VulnCategory.SQL_INJECTION, Severity.HIGH, "MEDIUM",
                                           description="SQL uses string concatenation. Use parameterized queries.")
