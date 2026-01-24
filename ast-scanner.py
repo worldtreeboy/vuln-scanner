@@ -3970,11 +3970,16 @@ class CSharpAnalyzer:
                     if match:
                         self.tainted_vars[match.group(1)] = i
 
-        # Method parameters
+        # Method parameters (handle async, static, virtual, override, etc.)
         for i, line in enumerate(self.source_lines, 1):
-            match = re.search(r'(?:public|private|protected|internal)\s+\w+\s+\w+\s*\(([^)]+)\)', line)
+            # Match method declarations with various modifiers: public async void Method(params)
+            match = re.search(
+                r'(?:public|private|protected|internal)\s+(?:static\s+)?(?:async\s+)?(?:virtual\s+)?(?:override\s+)?'
+                r'(?:\w+(?:<[^>]+>)?)\s+(\w+)\s*\(([^)]*)\)',
+                line
+            )
             if match:
-                params = match.group(1)
+                params = match.group(2)
                 for param_match in re.finditer(r'(?:\w+(?:<[^>]+>)?)\s+(\w+)', params):
                     self.tainted_vars[param_match.group(1)] = i
 
@@ -3982,14 +3987,26 @@ class CSharpAnalyzer:
         for i, line in enumerate(self.source_lines, 1):
             if line.strip().startswith('//'):
                 continue
-            match = re.search(r'(?:var|string|object|int)\s+(\w+)\s*=\s*(.+?);', line)
+            # Match variable declarations: var x = ...; or string x = ...;
+            match = re.search(r'(?:var|string|object|int|bool|Uri)\s+(\w+)\s*=\s*(.+?);', line)
             if match:
                 var_name = match.group(1)
                 rhs = match.group(2)
                 for tainted in list(self.tainted_vars.keys()):
+                    # Check if tainted var appears in RHS (including through method chains)
                     if re.search(rf'\b{re.escape(tainted)}\b', rhs):
                         self.tainted_vars[var_name] = i
                         break
+            # Also track simple assignments without type: x = tainted.Something();
+            else:
+                match = re.search(r'(\w+)\s*=\s*(.+?);', line)
+                if match and '==' not in line and '!=' not in line:
+                    var_name = match.group(1)
+                    rhs = match.group(2)
+                    for tainted in list(self.tainted_vars.keys()):
+                        if re.search(rf'\b{re.escape(tainted)}\b', rhs):
+                            self.tainted_vars[var_name] = i
+                            break
 
     def _track_field_assignments(self):
         """Track constructor parameter to field assignments for delayed execution patterns."""
@@ -4067,6 +4084,9 @@ class CSharpAnalyzer:
         self._check_path_traversal()
         self._check_xxe()
         self._check_ldap_injection()
+        self._check_xpath_injection()
+        self._check_ssrf()
+        self._check_ssti()
         return self.findings
 
     def _add_finding(self, line_num: int, vuln_name: str, category: VulnCategory,
@@ -4092,7 +4112,7 @@ class CSharpAnalyzer:
             r'SqlCommand\s*\(', r'new\s+SqlCommand\s*\(',
             r'\.CommandText\s*=',
         ]
-        sql_keywords = r'(?:SELECT|INSERT|UPDATE|DELETE|DROP|EXEC|EXECUTE)'
+        sql_keywords = r'(?:SELECT|INSERT|UPDATE|DELETE|DROP|EXEC|EXECUTE|FROM|WHERE|INTO)'
 
         for i, line in enumerate(self.source_lines, 1):
             if line.strip().startswith('//'):
@@ -4111,6 +4131,23 @@ class CSharpAnalyzer:
                         self._add_finding(i, "SQL Injection - Dynamic query construction",
                                           VulnCategory.SQL_INJECTION, Severity.HIGH, "MEDIUM",
                                           description="SQL uses string concatenation. Use parameterized queries.")
+
+            # Detect string.Format with SQL keywords (intermediate formatting evasion)
+            if re.search(r'string\.Format\s*\(', line, re.IGNORECASE):
+                is_tainted, taint_var = self._is_tainted(line)
+                # Check context for SQL keywords (in format string or nearby lines)
+                context = '\n'.join(self.source_lines[max(0, i-3):i+1])
+                if is_tainted and re.search(sql_keywords, context, re.IGNORECASE):
+                    self._add_finding(i, "SQL Injection - string.Format with tainted data",
+                                      VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                      "User input formatted into SQL string. Use parameterized queries.")
+                elif re.search(sql_keywords, context, re.IGNORECASE):
+                    # Check if any method param is in the Format call
+                    for var in self.tainted_vars:
+                        if re.search(rf'\b{re.escape(var)}\b', line):
+                            self._add_finding(i, "SQL Injection - string.Format with user input",
+                                              VulnCategory.SQL_INJECTION, Severity.HIGH, "HIGH", var,
+                                              "SQL query built via string.Format with user-controlled value.")
 
     def _check_command_injection(self):
         # Common system tools used in "helper" wrapper methods
@@ -4327,10 +4364,39 @@ class CSharpAnalyzer:
                         self._add_finding(i, f"Insecure Deserialization - {pattern.split('|')[0]}",
                                           VulnCategory.DESERIALIZATION, Severity.CRITICAL, "HIGH", taint_var,
                                           "Dangerous deserializer can lead to RCE.")
+                    elif 'JsonConvert.DeserializeObject' in line:
+                        # Check for dangerous TypeNameHandling in context
+                        context = '\n'.join(self.source_lines[max(0, i-10):i+1])
+                        has_typenamehandling = re.search(
+                            r'TypeNameHandling\s*[=.]\s*(?:TypeNameHandling\.)?(Auto|All|Objects|Arrays)',
+                            context
+                        )
+                        if has_typenamehandling and is_tainted:
+                            self._add_finding(i, "Insecure Deserialization - JsonConvert with TypeNameHandling",
+                                              VulnCategory.DESERIALIZATION, Severity.CRITICAL, "HIGH", taint_var,
+                                              f"TypeNameHandling.{has_typenamehandling.group(1)} enables arbitrary type instantiation. "
+                                              "Attacker can achieve RCE via gadget chains.")
+                        elif has_typenamehandling:
+                            self._add_finding(i, "Insecure Deserialization - TypeNameHandling enabled",
+                                              VulnCategory.DESERIALIZATION, Severity.CRITICAL, "HIGH",
+                                              description=f"TypeNameHandling.{has_typenamehandling.group(1)} allows arbitrary type "
+                                              "instantiation leading to RCE if attacker controls JSON input.")
+                        elif is_tainted:
+                            self._add_finding(i, "Insecure Deserialization - JsonConvert with tainted data",
+                                              VulnCategory.DESERIALIZATION, Severity.HIGH, "MEDIUM", taint_var,
+                                              "User data being deserialized. Check for TypeNameHandling settings.")
                     elif is_tainted:
                         self._add_finding(i, "Insecure Deserialization - Deserialize with tainted data",
                                           VulnCategory.DESERIALIZATION, Severity.HIGH, "MEDIUM", taint_var,
                                           "User data being deserialized.")
+
+            # Detect TypeNameHandling configuration (state-based vulnerability)
+            if re.search(r'TypeNameHandling\s*=\s*(?:TypeNameHandling\.)?(Auto|All|Objects)', line):
+                match = re.search(r'TypeNameHandling\s*=\s*(?:TypeNameHandling\.)?(Auto|All|Objects)', line)
+                self._add_finding(i, f"Insecure Deserialization - TypeNameHandling.{match.group(1)} configured",
+                                  VulnCategory.DESERIALIZATION, Severity.HIGH, "HIGH",
+                                  description=f"TypeNameHandling.{match.group(1)} enables arbitrary type instantiation. "
+                                  "If used with untrusted JSON input, this leads to RCE.")
 
     def _check_path_traversal(self):
         file_patterns = [
@@ -4420,6 +4486,131 @@ class CSharpAnalyzer:
                     self._add_finding(i, "LDAP Injection - Filter with tainted data",
                                       VulnCategory.LDAP_INJECTION, Severity.HIGH, "HIGH", taint_var,
                                       "User input in LDAP filter.")
+
+    def _check_xpath_injection(self):
+        """Detect XPath injection vulnerabilities."""
+        xpath_sinks = [
+            r'\.Evaluate\s*\(', r'\.Select\s*\(', r'\.SelectNodes\s*\(',
+            r'\.SelectSingleNode\s*\(', r'XPathExpression\.Compile\s*\(',
+            r'\.Compile\s*\(',  # XPath compile
+        ]
+
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+
+            # Check for XPath navigator/document usage
+            if re.search(r'XPathNavigator|XPathDocument|XmlDocument', line):
+                context = '\n'.join(self.source_lines[i:min(len(self.source_lines), i+10)])
+                for sink in xpath_sinks:
+                    if re.search(sink, context):
+                        # Check if query built with concatenation or tainted data
+                        is_tainted, taint_var = self._is_tainted(context)
+                        has_concat = '+' in context or '$"' in context or 'string.Format' in context.lower()
+
+                        if is_tainted and has_concat:
+                            # Find the actual sink line
+                            for j, ctx_line in enumerate(self.source_lines[i-1:min(len(self.source_lines), i+10)], i):
+                                if re.search(sink, ctx_line):
+                                    self._add_finding(j, "XPath Injection - Query with concatenated user input",
+                                                      VulnCategory.XPATH_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                                      "User input concatenated into XPath query. Use parameterized XPath.")
+                                    break
+                            break
+
+            # Direct sink detection
+            for sink in xpath_sinks:
+                if re.search(sink, line):
+                    is_tainted, taint_var = self._is_tainted(line)
+                    # Check context for concatenation
+                    context = '\n'.join(self.source_lines[max(0, i-5):i+1])
+                    has_concat = '+' in context or '$"' in context
+
+                    if is_tainted:
+                        self._add_finding(i, "XPath Injection - Evaluate with tainted data",
+                                          VulnCategory.XPATH_INJECTION, Severity.HIGH, "HIGH", taint_var,
+                                          "User input in XPath query.")
+                    elif has_concat and re.search(r'XPath|\.Evaluate|\.Select', context, re.IGNORECASE):
+                        # Check if any tainted var is in context
+                        for var in self.tainted_vars:
+                            if re.search(rf'\b{re.escape(var)}\b', context):
+                                self._add_finding(i, "XPath Injection - Dynamic query construction",
+                                                  VulnCategory.XPATH_INJECTION, Severity.HIGH, "HIGH", var,
+                                                  "XPath query built with string concatenation containing user input.")
+                                break
+
+    def _check_ssrf(self):
+        """Detect Server-Side Request Forgery vulnerabilities."""
+        http_sinks = [
+            r'HttpClient', r'WebClient', r'WebRequest',
+            r'\.GetAsync\s*\(', r'\.PostAsync\s*\(', r'\.SendAsync\s*\(',
+            r'\.DownloadString\s*\(', r'\.DownloadData\s*\(',
+            r'\.GetStringAsync\s*\(', r'\.GetByteArrayAsync\s*\(',
+            r'HttpWebRequest\.Create\s*\(', r'WebRequest\.Create\s*\(',
+            r'\.OpenRead\s*\(', r'\.UploadString\s*\(',
+        ]
+
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+
+            for sink in http_sinks:
+                if re.search(sink, line):
+                    is_tainted, taint_var = self._is_tainted(line)
+                    # Also check context for taint (laundered URLs)
+                    context = '\n'.join(self.source_lines[max(0, i-5):i+1])
+                    context_tainted, context_taint_var = self._is_tainted(context)
+
+                    if is_tainted:
+                        self._add_finding(i, "SSRF - HTTP request with user-controlled URL",
+                                          VulnCategory.SSRF, Severity.HIGH, "HIGH", taint_var,
+                                          "User input used as URL in HTTP request. Validate/allowlist URLs.")
+                    elif context_tainted:
+                        # Check for URL transformation (laundering)
+                        if re.search(r'\.Trim\(|\.ToLower\(|\.Replace\(|Uri\(', context):
+                            self._add_finding(i, "SSRF - HTTP request with transformed user URL",
+                                              VulnCategory.SSRF, Severity.HIGH, "HIGH", context_taint_var,
+                                              "User URL transformed before HTTP request. URL laundering detected.")
+                        else:
+                            self._add_finding(i, "SSRF - HTTP request with potentially tainted URL",
+                                              VulnCategory.SSRF, Severity.MEDIUM, "MEDIUM", context_taint_var,
+                                              "User input may flow to HTTP request URL.")
+
+    def _check_ssti(self):
+        """Detect Server-Side Template Injection vulnerabilities."""
+        template_sinks = [
+            # RazorEngine
+            r'Engine\.Razor\.RunCompile\s*\(', r'Engine\.Razor\.Compile\s*\(',
+            r'RazorEngine\.Razor\.Parse\s*\(', r'\.Parse\s*\([^)]*template',
+            # Scriban
+            r'Template\.Parse\s*\(', r'Template\.Render\s*\(',
+            # Liquid
+            r'Template\.ParseLiquid\s*\(',
+            # Generic template patterns
+            r'\.RenderTemplate\s*\(', r'\.CompileTemplate\s*\(',
+        ]
+
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('//'):
+                continue
+
+            for sink in template_sinks:
+                if re.search(sink, line):
+                    is_tainted, taint_var = self._is_tainted(line)
+
+                    if is_tainted:
+                        self._add_finding(i, "SSTI - Template compilation with user-controlled input",
+                                          VulnCategory.SSTI, Severity.CRITICAL, "HIGH", taint_var,
+                                          "User input used as template source. Attacker can execute arbitrary code.")
+                    else:
+                        # Check if first argument might be user-controlled
+                        context = '\n'.join(self.source_lines[max(0, i-5):i+1])
+                        for var in self.tainted_vars:
+                            if re.search(rf'\b{re.escape(var)}\b', line):
+                                self._add_finding(i, "SSTI - Template engine with user input",
+                                                  VulnCategory.SSTI, Severity.CRITICAL, "HIGH", var,
+                                                  "User-controlled template passed to template engine. RCE possible.")
+                                break
 
 
 class GoAnalyzer:
