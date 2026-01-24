@@ -1275,6 +1275,61 @@ class JavaScriptAnalyzer:
 
     def analyze(self):
         """Run the analysis."""
+        # Skip minified library files - they generate too many false positives
+        # and are third-party code outside developer control
+        # Third-party library patterns to skip (both minified and non-minified)
+        # These are external dependencies, not application code
+        minified_library_patterns = [
+            # jQuery (all versions, minified and non-minified)
+            r'jquery[.-][\d.]+\.min\.js$',
+            r'jquery[.-][\d.]+\.slim\.min\.js$',
+            r'jquery[.-][\d.]+\.slim\.js$',
+            r'jquery[.-][\d.]+\.js$',
+            r'jquery\.min\.js$',
+            # Bootstrap
+            r'bootstrap[.-][\d.]*\.min\.js$',
+            r'bootstrap[.-][\d.]*\.js$',
+            r'bootstrap\.bundle\.min\.js$',
+            r'bootstrap\.bundle\.js$',
+            r'bootstrap\.esm\.min\.js$',
+            r'bootstrap\.esm\.js$',
+            # Other frameworks
+            r'angular[.-][\d.]*\.min\.js$',
+            r'angular[.-][\d.]*\.js$',
+            r'react[.-][\d.]*\.min\.js$',
+            r'react[.-][\d.]*\.js$',
+            r'vue[.-][\d.]*\.min\.js$',
+            r'vue[.-][\d.]*\.js$',
+            # Utilities
+            r'lodash[.-][\d.]*\.min\.js$',
+            r'lodash[.-][\d.]*\.js$',
+            r'moment[.-][\d.]*\.min\.js$',
+            r'moment[.-][\d.]*\.js$',
+            r'axios[.-][\d.]*\.min\.js$',
+            r'axios[.-][\d.]*\.js$',
+            r'popper[.-][\d.]*\.min\.js$',
+            r'popper[.-][\d.]*\.js$',
+            r'modernizr[.-][\d.]*\.js$',
+            # Validation plugins
+            r'jquery\.validate[.-]?[\w.]*\.js$',
+            r'jquery\.validate\.unobtrusive[.-]?[\w.]*\.js$',
+            # IntelliSense files (VS tooling, not runtime code)
+            r'\.intellisense\.js$',
+            r'-vsdoc\.js$',
+        ]
+
+        import os
+        filename = os.path.basename(self.file_path)
+        for pattern in minified_library_patterns:
+            if re.search(pattern, filename, re.IGNORECASE):
+                # Skip this file entirely - it's a third-party library
+                return self.findings
+
+        # Also skip if file appears to be minified (very long lines, no newlines)
+        if len(self.source_lines) <= 5 and len(self.source_code) > 10000:
+            # Likely minified - skip to reduce noise
+            return self.findings
+
         self._check_eval_injection()
         self._check_command_injection()
         self._check_sql_injection()
@@ -3155,8 +3210,48 @@ class PHPAnalyzer:
         sql_funcs = r'(?:mysql_query|mysqli_query|pg_query|sqlite_query|mssql_query|odbc_exec|->query|->prepare|->exec)'
         sql_keywords = r'(?:SELECT|INSERT|UPDATE|DELETE|DROP|UNION|FROM|WHERE)'
 
+        # Laravel/Eloquent ORM safe patterns - these use parameterized queries
+        eloquent_safe_patterns = [
+            r'\w+::where\s*\(',           # Model::where() - Eloquent
+            r'\w+::find\s*\(',            # Model::find() - Eloquent
+            r'\w+::findOrFail\s*\(',      # Model::findOrFail() - Eloquent
+            r'\w+::first\s*\(',           # Model::first() - Eloquent
+            r'\w+::get\s*\(',             # Model::get() - Eloquent
+            r'\w+::all\s*\(',             # Model::all() - Eloquent
+            r'\w+::create\s*\(',          # Model::create() - Eloquent
+            r'\w+::update\s*\(',          # Model::update() - Eloquent
+            r'\w+::delete\s*\(',          # Model::delete() - Eloquent
+            r'->where\s*\([^)]*,\s*[\'"][=<>!]+[\'"]\s*,', # ->where('col', '=', $val) parameterized
+            r'->where\s*\(\s*[\'"][\w_]+[\'"]\s*,\s*\$',   # ->where('col', $val) parameterized
+            r'->first\s*\(\s*\)',         # ->first() - safe
+            r'->get\s*\(\s*\)',           # ->get() - safe
+            r'->update\s*\(\s*\[',        # ->update([...]) - safe array syntax
+            r'->save\s*\(\s*\)',          # ->save() - safe
+        ]
+
+        # MongoDB $where is dangerous (NoSQL injection)
+        nosql_dangerous = [
+            r'\[\s*[\'\"]\$where[\'\"]',  # ['$where' => ...] - dangerous
+            r'findOne\s*\(\s*\[\s*[\'\"]\$where', # findOne(['$where' => ...])
+        ]
+
         for i, line in enumerate(self.source_lines, 1):
             if line.strip().startswith('//') or line.strip().startswith('#'):
+                continue
+
+            # Check for MongoDB NoSQL injection first (higher priority)
+            for pattern in nosql_dangerous:
+                if re.search(pattern, line):
+                    is_tainted, taint_var = self._is_tainted(line)
+                    if is_tainted:
+                        self._add_finding(i, "NoSQL Injection - MongoDB $where with tainted data",
+                                          VulnCategory.NOSQL_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                          "MongoDB $where operator allows JavaScript injection.")
+                        return  # Don't double-report
+
+            # Skip Eloquent ORM safe patterns (parameterized queries)
+            is_eloquent_safe = any(re.search(p, line) for p in eloquent_safe_patterns)
+            if is_eloquent_safe:
                 continue
 
             # Direct query with concatenation
@@ -3199,6 +3294,19 @@ class PHPAnalyzer:
             var_func_match = re.search(r'\$(\w+)\s*\(', line)
             if var_func_match:
                 var_name = var_func_match.group(1)
+
+                # Skip Laravel/framework safe patterns
+                laravel_safe_patterns = [
+                    r'\$next\s*\(\s*\$request\s*\)',  # Middleware: $next($request)
+                    r'\$callback\s*\(',               # Common callback pattern
+                    r'\$handler\s*\(',                # Handler pattern
+                    r'\$resolver\s*\(',               # Resolver pattern
+                    r'\$this\s*\(',                   # $this is not a variable function
+                ]
+                is_framework_safe = any(re.search(p, line) for p in laravel_safe_patterns)
+                if is_framework_safe:
+                    continue
+
                 # Check if this variable might contain a dangerous function name
                 context = '\n'.join(self.source_lines[max(0, i-10):i])
                 if re.search(rf'\${re.escape(var_name)}\s*=\s*["\'](?:system|exec|shell_exec|passthru|popen|eval)', context):
@@ -3282,16 +3390,35 @@ class PHPAnalyzer:
     def _check_file_inclusion(self):
         include_funcs = r'\b(include|include_once|require|require_once)\s*[\(\s]'
 
+        # Safe PHP magic constants (server-controlled, not user input)
+        safe_constants = [
+            r'__DIR__',           # Directory of current file
+            r'__FILE__',          # Full path of current file
+            r'dirname\s*\(\s*__', # dirname(__FILE__) or dirname(__DIR__)
+            r'ABSPATH',           # WordPress constant
+            r'BASEPATH',          # CodeIgniter constant
+            r'APPPATH',           # CodeIgniter constant
+            r'base_path\s*\(',    # Laravel helper
+            r'app_path\s*\(',     # Laravel helper
+            r'resource_path\s*\(',# Laravel helper
+        ]
+
         for i, line in enumerate(self.source_lines, 1):
             if line.strip().startswith('//'):
                 continue
             if re.search(include_funcs, line):
+                # Skip if using safe server-controlled constants
+                uses_safe_constant = any(re.search(p, line) for p in safe_constants)
+                if uses_safe_constant:
+                    continue
+
                 is_tainted, taint_var = self._is_tainted(line)
                 if is_tainted:
                     self._add_finding(i, "File Inclusion - LFI/RFI with tainted data",
                                       VulnCategory.LFI_RFI, Severity.CRITICAL, "HIGH", taint_var,
                                       "User input in file inclusion allows LFI/RFI.")
                 elif re.search(r'\$\w+', line):
+                    # Check if the variable is likely safe (e.g., assigned from constants)
                     self._add_finding(i, "File Inclusion - Dynamic include",
                                       VulnCategory.PATH_TRAVERSAL, Severity.HIGH, "MEDIUM",
                                       description="Variable in file inclusion. Verify source.")
