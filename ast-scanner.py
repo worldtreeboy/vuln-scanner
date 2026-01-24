@@ -1735,6 +1735,7 @@ class JavaScriptAnalyzer:
         self._check_xpath_injection()
         self._check_auth_bypass()
         self._check_xss()
+        self._check_evasive_xss()
         return self.findings
 
     def _add_finding(self, line_num: int, vuln_name: str, category: VulnCategory,
@@ -3120,6 +3121,244 @@ class JavaScriptAnalyzer:
                     self._add_finding(i, vuln_name,
                                       VulnCategory.XSS, Severity.CRITICAL, "HIGH",
                                       "javascript: protocol allows arbitrary code execution.")
+
+    def _check_evasive_xss(self):
+        """
+        Detect advanced evasive DOM-based XSS patterns that bypass simple AST analysis.
+
+        Covers:
+        1. String.fromCharCode obfuscation (ASCII arrays spelling dangerous sinks)
+        2. Computed property access (building sink names from parts)
+        3. Prototype descriptor abuse (Object.getOwnPropertyDescriptor().set.call())
+        4. Async taint flow (setTimeout/setInterval with closures)
+        5. Array-based string building (fragments[1] + fragments[2])
+        6. eval/Function aliasing (assigning to innocent variable names)
+        """
+
+        # ===== PHASE 1: Pre-scan for dangerous patterns =====
+
+        # Track variables that might hold decoded dangerous strings
+        decoded_vars = {}  # var_name -> decoded_string
+        alias_vars = {}    # var_name -> what it aliases (eval, Function, innerHTML, etc.)
+        array_vars = {}    # var_name -> line_number (arrays that might hold ASCII codes)
+        fragment_arrays = {}  # var_name -> line_number (arrays with string fragments)
+
+        # Dangerous ASCII sequences to detect
+        dangerous_ascii = {
+            'innerHTML': [105, 110, 110, 101, 114, 72, 84, 77, 76],
+            'outerHTML': [111, 117, 116, 101, 114, 72, 84, 77, 76],
+            'eval': [101, 118, 97, 108],
+            'Function': [70, 117, 110, 99, 116, 105, 111, 110],
+            'document': [100, 111, 99, 117, 109, 101, 110, 116],
+            'write': [119, 114, 105, 116, 101],
+            'cookie': [99, 111, 111, 107, 105, 101],
+        }
+
+        for i, line in enumerate(self.source_lines, 1):
+            stripped = line.strip()
+            if stripped.startswith('//') or stripped.startswith('/*'):
+                continue
+
+            # ===== PATTERN 1: String.fromCharCode with ASCII arrays =====
+            # Detect: const _0x5f21 = [105, 110, 110, 101, 114, 72, 84, 77, 76];
+            ascii_array_match = re.search(r'(?:const|let|var)\s+(\w+)\s*=\s*\[([\d,\s]+)\]', line)
+            if ascii_array_match:
+                var_name = ascii_array_match.group(1)
+                array_content = ascii_array_match.group(2)
+                try:
+                    # Parse the numbers
+                    nums = [int(n.strip()) for n in array_content.split(',') if n.strip().isdigit()]
+                    if len(nums) >= 4 and all(32 <= n <= 126 for n in nums):  # Printable ASCII range
+                        decoded = ''.join(chr(n) for n in nums)
+                        # Check if it spells a dangerous word
+                        for danger_word in dangerous_ascii.keys():
+                            if danger_word.lower() in decoded.lower():
+                                array_vars[var_name] = i
+                                decoded_vars[var_name] = decoded
+                                self._add_finding(i, f"Evasive XSS - ASCII array encodes '{decoded}'",
+                                                  VulnCategory.XSS, Severity.CRITICAL, "HIGH",
+                                                  f"Obfuscated string '{decoded}' hidden as ASCII codes. "
+                                                  f"This is an advanced evasion technique.")
+                except (ValueError, TypeError):
+                    pass
+
+            # Detect String.fromCharCode usage with array
+            if re.search(r'String\.fromCharCode', line):
+                # Check if referencing a tracked array
+                for arr_var in array_vars:
+                    if arr_var in line:
+                        self._add_finding(i, "Evasive XSS - String.fromCharCode decoding",
+                                          VulnCategory.XSS, Severity.CRITICAL, "HIGH",
+                                          f"Decoding ASCII array '{arr_var}' via String.fromCharCode. "
+                                          f"Known decoded value: '{decoded_vars.get(arr_var, 'unknown')}'")
+
+            # Detect: arr.map(c => String.fromCharCode(c)).join('')
+            if re.search(r'\.map\s*\([^)]*String\.fromCharCode[^)]*\)\s*\.\s*join', line):
+                self._add_finding(i, "Evasive XSS - Array decode via map/fromCharCode/join",
+                                  VulnCategory.XSS, Severity.CRITICAL, "HIGH",
+                                  "Array-to-string decoding pattern. Commonly used to hide 'innerHTML' or 'eval'.")
+
+            # ===== PATTERN 2: Computed property access (building sink names) =====
+            # Detect: const p1 = "inn"; const p2 = "erHT"; sink = p1 + p2 + p3;
+            string_fragment_match = re.search(r'(?:const|let|var)\s+(\w+)\s*=\s*["\'](\w{2,6})["\']', line)
+            if string_fragment_match:
+                var_name = string_fragment_match.group(1)
+                fragment = string_fragment_match.group(2)
+                # Check if fragment is part of a dangerous word
+                for danger in ['inn', 'erH', 'TML', 'out', 'eva', 'Fun', 'cti', 'wri', 'ite', 'doc', 'ume']:
+                    if fragment.lower().startswith(danger.lower()) or fragment.lower().endswith(danger.lower()):
+                        fragment_arrays[var_name] = (i, fragment)
+
+            # Detect: sink = p1 + p2 + p3 (concatenating fragments)
+            concat_match = re.search(r'(?:const|let|var)?\s*(\w+)\s*=\s*(\w+)\s*\+\s*(\w+)(?:\s*\+\s*(\w+))?', line)
+            if concat_match:
+                result_var = concat_match.group(1)
+                parts = [concat_match.group(2), concat_match.group(3)]
+                if concat_match.group(4):
+                    parts.append(concat_match.group(4))
+
+                # Check if combining known fragments
+                known_parts = [p for p in parts if p in fragment_arrays]
+                if len(known_parts) >= 2:
+                    combined = ''.join(fragment_arrays[p][1] for p in known_parts if p in fragment_arrays)
+                    if any(d in combined.lower() for d in ['innerhtml', 'outerhtml', 'eval', 'function', 'write']):
+                        self._add_finding(i, f"Evasive XSS - Computed sink name '{combined}'",
+                                          VulnCategory.XSS, Severity.CRITICAL, "HIGH",
+                                          f"Sink name built from string fragments: {' + '.join(known_parts)}")
+                        alias_vars[result_var] = combined
+
+            # Detect: element[sinkVar] = data (bracket notation with variable)
+            bracket_sink = re.search(r'(\w+)\s*\[\s*(\w+)\s*\]\s*=', line)
+            if bracket_sink:
+                sink_var = bracket_sink.group(2)
+                if sink_var in alias_vars or sink_var in decoded_vars:
+                    resolved = alias_vars.get(sink_var) or decoded_vars.get(sink_var)
+                    self._add_finding(i, f"Evasive XSS - Dynamic property assignment [{sink_var}]",
+                                      VulnCategory.XSS, Severity.CRITICAL, "HIGH",
+                                      f"Bracket notation hides sink. Resolved: '{resolved}'")
+                elif sink_var not in ['i', 'j', 'k', 'idx', 'index', 'key', 'id']:
+                    # Generic suspicious bracket notation
+                    self._add_finding(i, "Evasive XSS - Suspicious dynamic property access",
+                                      VulnCategory.XSS, Severity.HIGH, "MEDIUM",
+                                      f"Property name from variable '{sink_var}' - may hide innerHTML/eval.")
+
+            # ===== PATTERN 3: Prototype descriptor abuse =====
+            # Detect: Object.getOwnPropertyDescriptor(Element.prototype, sink).set.call(target, data)
+            if re.search(r'Object\.getOwnPropertyDescriptor\s*\([^)]*(?:prototype|Element|HTMLElement)', line):
+                self._add_finding(i, "Evasive XSS - Prototype descriptor manipulation",
+                                  VulnCategory.XSS, Severity.CRITICAL, "HIGH",
+                                  "Object.getOwnPropertyDescriptor on DOM prototype. "
+                                  "Advanced evasion to call innerHTML setter indirectly.")
+
+            # Detect: .set.call( or .set.apply(
+            if re.search(r'\.set\s*\.\s*(?:call|apply)\s*\(', line):
+                context = '\n'.join(self.source_lines[max(0, i-5):i+1])
+                if re.search(r'getOwnPropertyDescriptor|prototype|Element|innerHTML|outerHTML', context):
+                    self._add_finding(i, "Evasive XSS - Descriptor setter invocation",
+                                      VulnCategory.XSS, Severity.CRITICAL, "HIGH",
+                                      "Using .set.call() to invoke property setter. "
+                                      "Bypasses direct innerHTML detection.")
+
+            # ===== PATTERN 4: Async taint flow (setTimeout/setInterval closures) =====
+            # Detect setTimeout/setInterval with arrow function or callback
+            async_match = re.search(r'(setTimeout|setInterval|Promise\.resolve|requestAnimationFrame|queueMicrotask)\s*\(\s*(?:\(\s*\)\s*=>|function)', line)
+            if async_match:
+                async_type = async_match.group(1)
+                # Look ahead for dangerous patterns in the callback
+                context_end = min(len(self.source_lines), i + 15)
+                async_context = '\n'.join(self.source_lines[i-1:context_end])
+
+                # Check for taint sources in async context
+                has_source = any(re.search(p, async_context) for p in [
+                    r'location\.', r'sessionStorage', r'localStorage', r'URLSearchParams',
+                    r'\.getItem\s*\(', r'document\.referrer', r'window\.name'
+                ])
+                # Check for sinks in async context
+                has_sink = any(re.search(p, async_context) for p in [
+                    r'innerHTML', r'outerHTML', r'document\.write', r'\.html\s*\(',
+                    r'insertAdjacentHTML', r'\[\s*\w+\s*\]\s*='
+                ])
+
+                if has_source and has_sink:
+                    self._add_finding(i, f"Evasive XSS - Async taint flow via {async_type}",
+                                      VulnCategory.XSS, Severity.CRITICAL, "HIGH",
+                                      f"{async_type} callback contains both taint source and sink. "
+                                      f"Async execution breaks linear taint tracking.")
+                elif has_sink:
+                    self._add_finding(i, f"Evasive XSS - Potential async sink in {async_type}",
+                                      VulnCategory.XSS, Severity.HIGH, "MEDIUM",
+                                      f"DOM sink inside {async_type} callback - verify data source.")
+
+            # ===== PATTERN 5: Array fragment access =====
+            # Detect: fragments[0], fragments[1] + fragments[2] pattern
+            array_index_concat = re.search(r'(\w+)\s*\[\s*\d+\s*\]\s*\+\s*\1\s*\[\s*\d+\s*\]', line)
+            if array_index_concat:
+                arr_name = array_index_concat.group(1)
+                self._add_finding(i, "Evasive XSS - Array index concatenation",
+                                  VulnCategory.XSS, Severity.HIGH, "HIGH",
+                                  f"Building string from array indices: {arr_name}[n] + {arr_name}[m]. "
+                                  f"Common pattern to hide 'innerHTML' in array.")
+
+            # Detect: const payload = arr[0]; (extracting taint from array)
+            if re.search(r'(?:const|let|var)\s+\w+\s*=\s*\w+\s*\[\s*0\s*\]', line):
+                context = '\n'.join(self.source_lines[max(0, i-10):i])
+                if re.search(r'URLSearchParams|location\.|getItem|sessionStorage|localStorage', context):
+                    self._add_finding(i, "Evasive XSS - Taint extraction from array",
+                                      VulnCategory.XSS, Severity.HIGH, "HIGH",
+                                      "Extracting value from array that may contain user input. "
+                                      "Array used as taint tunnel.")
+
+            # ===== PATTERN 6: eval/Function aliasing =====
+            # Detect: const run = window[decode(_0x9922)]; or run = eval; or fn = Function;
+            alias_match = re.search(r'(?:const|let|var)\s+(\w+)\s*=\s*(?:window\s*\[|global\s*\[|globalThis\s*\[|eval\b|Function\b)', line)
+            if alias_match:
+                alias_name = alias_match.group(1)
+                if 'eval' in line or 'Function' in line:
+                    alias_vars[alias_name] = 'eval/Function'
+                    self._add_finding(i, f"Evasive XSS - eval/Function aliased to '{alias_name}'",
+                                      VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH",
+                                      f"Dangerous function assigned to '{alias_name}'. "
+                                      f"Subsequent '{alias_name}(...)' calls execute arbitrary code.")
+                else:
+                    # Check if accessing decoded array
+                    for arr_var, decoded in decoded_vars.items():
+                        if arr_var in line:
+                            if 'eval' in decoded.lower() or 'function' in decoded.lower():
+                                alias_vars[alias_name] = decoded
+                                self._add_finding(i, f"Evasive XSS - Dynamic eval alias '{alias_name}'",
+                                                  VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH",
+                                                  f"'{alias_name}' assigned from decoded array containing '{decoded}'.")
+
+            # Detect calls to aliased eval/Function
+            for alias_name, aliased_to in alias_vars.items():
+                if re.search(rf'\b{re.escape(alias_name)}\s*\(', line) and alias_name != 'eval' and alias_name != 'Function':
+                    if 'eval' in str(aliased_to).lower() or 'function' in str(aliased_to).lower():
+                        self._add_finding(i, f"Evasive XSS - Aliased eval invocation: {alias_name}()",
+                                          VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH",
+                                          f"Call to '{alias_name}' which aliases '{aliased_to}'.")
+
+            # ===== PATTERN 7: Template literal injection in eval context =====
+            # Detect: run(`document.body.${sink} = "${data}"`);
+            template_eval = re.search(r'\w+\s*\(\s*`[^`]*\$\{[^}]+\}[^`]*`\s*\)', line)
+            if template_eval:
+                context = '\n'.join(self.source_lines[max(0, i-10):i+1])
+                # Check if the function is an aliased eval
+                for alias in alias_vars:
+                    if re.search(rf'\b{re.escape(alias)}\s*\(', line):
+                        self._add_finding(i, "Evasive XSS - Template literal in aliased eval",
+                                          VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH",
+                                          "Eval alias called with template literal containing interpolation. "
+                                          "Dynamic code execution with embedded variables.")
+
+            # ===== PATTERN 8: Indirect DOM access patterns =====
+            # Detect: document.querySelector('#app') followed by property manipulation
+            if re.search(r'document\.querySelector\s*\(|document\.getElementById\s*\(|document\.getElementsBy', line):
+                # Track that we have a DOM element, look for subsequent manipulation
+                context = '\n'.join(self.source_lines[i-1:min(len(self.source_lines), i+10)])
+                if re.search(r'\[\s*\w+\s*\]\s*=', context):
+                    self._add_finding(i, "Evasive XSS - DOM element with dynamic property",
+                                      VulnCategory.XSS, Severity.HIGH, "MEDIUM",
+                                      "DOM element accessed, then manipulated via bracket notation.")
 
 
 class JavaAnalyzer:

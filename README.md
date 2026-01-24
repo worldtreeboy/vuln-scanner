@@ -350,6 +350,76 @@ $input = $_POST['data'];
 echo $input;
 ```
 
+### Evasive DOM-Based XSS Detection
+
+Advanced detection for obfuscated XSS patterns that bypass simple AST analysis:
+
+**Pattern 1: ASCII Array Encoding (String.fromCharCode)**
+```javascript
+// DETECTED: ASCII codes spelling "innerHTML" and "eval"
+const _0x5f21 = [105, 110, 110, 101, 114, 72, 84, 77, 76]; // "innerHTML"
+const _0x9922 = [101, 118, 97, 108];                      // "eval"
+
+// DETECTED: Decoding via map/fromCharCode/join
+const decode = (arr) => arr.map(c => String.fromCharCode(c)).join('');
+```
+
+**Pattern 2: Computed Property Access (String Fragments)**
+```javascript
+// DETECTED: Building sink name from fragments
+const p1 = "inn";
+const p2 = "erHT";
+const p3 = "ML";
+const sink = p1 + p2 + p3;  // Resolves to "innerHTML"
+
+// DETECTED: Dynamic property assignment
+element[sink] = userInput;
+```
+
+**Pattern 3: Prototype Descriptor Abuse**
+```javascript
+// DETECTED: Indirect innerHTML setter via prototype
+Object.getOwnPropertyDescriptor(Element.prototype, sink).set.call(target, source);
+```
+
+**Pattern 4: Async Taint Flow (setTimeout/Promise/RAF)**
+```javascript
+// DETECTED: Taint source + sink in setTimeout callback
+setTimeout(() => {
+    document.body.innerHTML = sessionStorage.getItem('payload');
+}, 0);
+
+// DETECTED: Promise-based evasion
+Promise.resolve(localStorage.getItem('data'))
+    .then(data => elem.innerHTML = data);
+
+// DETECTED: requestAnimationFrame evasion
+requestAnimationFrame(() => {
+    document.body.outerHTML = window.name;
+});
+```
+
+**Pattern 5: Array-Based Taint Tunnel**
+```javascript
+// DETECTED: Taint hidden in array, sink built from indices
+const fragments = [
+    new URLSearchParams(location.search).get('xss'), // [0] Taint
+    "inner",                                         // [1]
+    "HTML"                                           // [2]
+];
+const sinkName = fragments[1] + fragments[2];
+body[sinkName] = fragments[0];
+```
+
+**Pattern 6: eval/Function Aliasing**
+```javascript
+// DETECTED: Aliasing eval to innocent variable name
+const run = window[decode(_0x9922)];  // run = eval
+
+// DETECTED: Aliased eval invocation with template literal
+run(`document.body.${sink} = "${data}"`);
+```
+
 ### C# Destructor/Finalizer Command Injection
 
 Detects the "Bomb" pattern where command injection is hidden in destructors for delayed execution:
@@ -650,6 +720,7 @@ vuln-scanner/
 ├── README.md           # Documentation
 ├── LICENSE             # MIT License
 └── test-files/         # Sample vulnerable configurations for testing
+    ├── evasive-xss.js                # JavaScript - Advanced evasion patterns
     ├── xss-test.js                   # JavaScript - DOM-based & Reflected XSS
     ├── xss-test.php                  # PHP - Superglobal & tainted XSS
     ├── web.config                    # ASP.NET - ViewState, MachineKey
@@ -669,6 +740,7 @@ The `test-files/` directory contains **intentionally vulnerable** configuration 
 
 | File | Framework | Key Vulnerabilities |
 |------|-----------|---------------------|
+| `evasive-xss.js` | JavaScript | ASCII encoding, prototype abuse, async taint, eval aliasing |
 | `xss-test.js` | JavaScript | DOM-based XSS, Reflected XSS, jQuery, React, Angular, Vue |
 | `xss-test.php` | PHP | Direct superglobal output, tainted variable XSS |
 | `web.config` | ASP.NET | ViewState MAC disabled, MachineKey validation=None |
