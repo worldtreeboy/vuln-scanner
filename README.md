@@ -13,12 +13,12 @@
 <h3 align="center">Advanced Multi-Language SAST with 2nd-Order Injection Detection</h3>
 
 <p align="center">
-  <a href="#-proven-results">Proven Results</a> •
-  <a href="#-2nd-order-detection">2nd-Order Detection</a> •
-  <a href="#-features">Features</a> •
-  <a href="#-quick-start">Quick Start</a> •
-  <a href="#-detection-patterns">Detection Patterns</a> •
-  <a href="#-language-support">Languages</a>
+  <a href="#proven-results">Proven Results</a> •
+  <a href="#2nd-order-detection">2nd-Order Detection</a> •
+  <a href="#features">Features</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#detection-patterns">Detection Patterns</a> •
+  <a href="#language-support">Languages</a>
 </p>
 
 <p align="center">
