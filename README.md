@@ -318,6 +318,28 @@ The following vulnerability types are **not** scanned:
 | XXE/XSLT | Excellent | - | XmlResolver |
 | Expression Language | Excellent | - | SpEL, OGNL, MVEL, EL |
 
+### Multi-Language Test Validation
+
+The scanner has been validated against comprehensive test suites covering all vulnerability categories across 5 languages:
+
+| Language | True Positives | Categories Covered |
+|----------|:--------------:|:-------------------|
+| **Java** | 30+ | SQL/HQL/NoSQL, Command, Code, XPath, XXE, XSLT, SSRF, SSTI, Deserialization |
+| **Python** | 35+ | SQL/NoSQL, Command, Code, XPath, XXE, SSRF, SSTI, Deserialization, Evasion |
+| **PHP** | 30+ | SQL/NoSQL, Command, Code, XPath, XXE, XSLT, SSRF, SSTI, Deserialization, Evasion |
+| **Ruby** | 25+ | SQL/NoSQL, Command, Code, XPath, XXE, SSRF, SSTI, Deserialization, Evasion |
+| **C#** | 30+ | SQL/NoSQL, Command, Code, XPath, XXE, XSLT, SSRF, SSTI, Deserialization, Evasion |
+
+**Test categories include:**
+- SQL/NoSQL/HQL Injection (string concat, format, interpolation, 2nd-order)
+- Command Injection (system, exec, subprocess, ProcessBuilder)
+- Code Injection (eval, exec, ScriptEngine, SpEL, OGNL)
+- XPath/XQuery Injection (XPath, SelectNodes, DOMXPath)
+- XXE & XSLT Attacks (XMLParser, DocumentBuilder, XslTransform)
+- SSRF (requests, HttpClient, cURL, Net::HTTP)
+- SSTI (Jinja2, Twig, ERB, Freemarker, Velocity)
+- Insecure Deserialization (pickle, unserialize, Marshal, BinaryFormatter, SnakeYAML)
+
 ---
 
 ## Quick Start
