@@ -111,7 +111,6 @@
 - SQL Injection via string concatenation
 - SSRF in URL construction
 - XStream deserialization vulnerabilities
-- Prototype pollution patterns
 
 </td>
 <td width="50%" valign="top">
@@ -285,7 +284,6 @@ db.Products.FromSqlRaw(
 - XXE & XSLT Attacks
 - SSRF & SSTI
 - Insecure Deserialization
-- Prototype Pollution RCE
 
 ### Not Detected
 The following vulnerability types are **not** scanned:
@@ -293,6 +291,7 @@ The following vulnerability types are **not** scanned:
 - Path Traversal
 - Weak Cryptography
 - Session Fixation
+- Prototype Pollution
 
 </td>
 </tr>
@@ -310,7 +309,6 @@ The following vulnerability types are **not** scanned:
 | Deserialization | Excellent | Double-unserialize | ViewState, SnakeYAML |
 | XXE/XSLT | Excellent | - | XmlResolver |
 | Expression Language | Excellent | - | SpEL, OGNL, MVEL, EL |
-| Prototype Pollution | Excellent | Ghost Sink RCE | __proto__, Object.assign |
 
 ---
 
@@ -454,21 +452,7 @@ cp[method](userInput);       // Dynamic method invocation
 </details>
 
 <details>
-<summary><b>Level 2: Prototype Pollution "Ghost Sink" RCE</b></summary>
-
-```javascript
-// DETECTED: Prototype pollution enables "safe-looking" exec
-const config = {};
-Object.assign(config.__proto__, JSON.parse(userInput));
-// Attacker sets: {"shell": true}
-
-// This LOOKS safe but inherits polluted shell option!
-execSync('echo hello');  // Now executes with shell=true from __proto__
-```
-</details>
-
-<details>
-<summary><b>Level 3: Worker Thread Cross-Context Taint</b></summary>
+<summary><b>Level 2: Worker Thread Cross-Context Taint</b></summary>
 
 ```javascript
 // DETECTED: Taint flows through Worker threads
@@ -483,7 +467,7 @@ execSync(workerData);  // Taint from main thread!
 </details>
 
 <details>
-<summary><b>Level 4: toString Hijack Implicit Execution</b></summary>
+<summary><b>Level 3: toString Hijack Implicit Execution</b></summary>
 
 ```javascript
 // DETECTED: Implicit code execution via toString hijack
