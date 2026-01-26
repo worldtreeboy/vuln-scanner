@@ -109,8 +109,6 @@
 
 **WebGoat (Java)**
 - SQL Injection via string concatenation
-- XSS via innerHTML assignments
-- Path Traversal in file operations
 - SSRF in URL construction
 - XStream deserialization vulnerabilities
 - Prototype pollution patterns
@@ -133,7 +131,6 @@
 - SSTI via `render_template_string()`
 - Command Injection in subprocess calls
 - Insecure Pickle deserialization
-- Path Traversal in file open/save
 - SQL Injection via string formatting
 
 </td>
@@ -143,7 +140,6 @@
 - `eval()` with user input (RCE)
 - NoSQL Injection with `$ne` operator
 - Dynamic `require()` for RCE
-- Path traversal via `path.resolve()`
 
 </td>
 </tr>
@@ -289,9 +285,14 @@ db.Products.FromSqlRaw(
 - XXE & XSLT Attacks
 - SSRF & SSTI
 - Insecure Deserialization
-- Path Traversal
-- React XSS (Level 1-5)
 - Prototype Pollution RCE
+
+### Not Detected
+The following vulnerability types are **not** scanned:
+- Cross-Site Scripting (XSS)
+- Path Traversal
+- Weak Cryptography
+- Session Fixation
 
 </td>
 </tr>
