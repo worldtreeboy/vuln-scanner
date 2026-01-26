@@ -1471,7 +1471,30 @@ class PythonTaintTracker(ast.NodeVisitor):
                 # Enhanced: Check if second argument is a tainted/user-controlled variable
                 getattr_match = re.search(r'getattr\s*\(\s*(\w+)\s*,\s*(\w+)\s*\)', line)
                 if getattr_match:
+                    target_obj = getattr_match.group(1)
                     attr_var = getattr_match.group(2)
+
+                    # Check for allowlist patterns BEFORE the getattr call
+                    # Look back up to 10 lines for validation like: if attr_var in ['safe', 'list']
+                    context = '\n'.join(self.source_lines[max(0, i-10):i])
+                    allowlist_patterns = [
+                        rf'if\s+{re.escape(attr_var)}\s+in\s+\[',      # if var in [...]
+                        rf'if\s+{re.escape(attr_var)}\s+in\s+\{{',     # if var in {...}
+                        rf'if\s+{re.escape(attr_var)}\s+in\s+\(',      # if var in (...)
+                        rf'if\s+{re.escape(attr_var)}\s+in\s+\w+',     # if var in ALLOWED
+                        rf'{re.escape(attr_var)}\s+not\s+in',          # if var not in ...
+                    ]
+                    has_allowlist = any(re.search(p, context) for p in allowlist_patterns)
+
+                    # Skip if allowlist validation is present
+                    if has_allowlist:
+                        continue
+
+                    # Check if the target is a safe module (like math, string, json)
+                    safe_modules = {'math', 'string', 'json', 'datetime', 'collections', 'itertools', 'functools', 'operator', 're', 'logging', 'logger'}
+                    if target_obj in safe_modules:
+                        continue
+
                     # Check if the variable is in tainted_vars
                     if attr_var in self.tainted_vars:
                         self.findings.append(Finding(
@@ -2831,16 +2854,41 @@ class JavaScriptAnalyzer:
                 test_fixture_pattern = re.compile(r'\$\{(?:user|admin|customer|order|product|test|mock|fixture)\w*\.', re.IGNORECASE)
                 is_test_fixture_data = is_test_file and test_fixture_pattern.search(line)
 
-                if not is_false_positive and not is_browser_pattern and not is_ui_pattern and not all_numeric and not is_hardcoded_migration and not is_test_fixture_data:
+                # Check if this is a tagged template literal (sql`...`, gql`...`, etc.)
+                # Tagged templates are handled separately below with appropriate confidence levels
+                tagged_match = re.search(r'(\w+)\s*`', line)
+                is_tagged = tagged_match and tagged_match.group(1).lower() not in ['const', 'let', 'var', 'return', 'function', 'if', 'else', 'for', 'while']
+
+                if not is_false_positive and not is_browser_pattern and not is_ui_pattern and not all_numeric and not is_hardcoded_migration and not is_test_fixture_data and not is_tagged:
                     self._add_finding(i, "SQL Injection - Template literal",
                                       VulnCategory.SQL_INJECTION, Severity.HIGH, "HIGH",
                                       "SQL query uses template literal interpolation.")
 
-            # Tagged template literals (sql`...`)
-            if re.search(rf'\bsql\s*`[^`]*{sql_keywords}', line, re.IGNORECASE):
-                self._add_finding(i, "SQL Injection - Tagged template literal",
-                                  VulnCategory.SQL_INJECTION, Severity.HIGH, "HIGH",
-                                  "SQL via tagged template may allow injection if not properly escaped.")
+            # Tagged template literals (sql`...`, SQL`...`, gql`...`, etc.)
+            # These are generally safer than regular template literals because the tag function
+            # typically handles parameterization (e.g., sql-template-strings, slonik, postgres.js)
+            # Also includes non-SQL tags like gql, graphql, html, css that shouldn't flag as SQL
+            tagged_template_match = re.search(rf'(\w+)\s*`[^`]*{sql_keywords}', line, re.IGNORECASE)
+            if tagged_template_match:
+                tag_name = tagged_template_match.group(1).lower()
+                # Safe tagged template libraries/tags that handle parameterization
+                safe_sql_tags = ['sql', 'prisma', 'knex', 'slonik', 'pg', 'postgres', 'mysql', 'sequelize', 'raw']
+                # Non-SQL tags that should be skipped entirely (false positives)
+                # gql/graphql may have SELECT-like keywords but aren't SQL
+                # html/css may have keywords that look like SQL but aren't
+                non_sql_tags = ['gql', 'graphql', 'html', 'css', 'styled', 'jsx', 'tsx', 'markdown', 'md']
+                if tag_name in non_sql_tags:
+                    continue  # Skip - not SQL, these are other template literal types
+                elif tag_name in safe_sql_tags:
+                    # Lower confidence - tagged templates usually handle escaping
+                    self._add_finding(i, "SQL Injection - Tagged template literal (likely safe)",
+                                      VulnCategory.SQL_INJECTION, Severity.MEDIUM, "LOW",
+                                      f"SQL via tagged template '{tag_name}`...`. Tagged templates often handle "
+                                      "parameterization safely. Verify the tag function escapes properly.")
+                else:
+                    self._add_finding(i, "SQL Injection - Tagged template literal",
+                                      VulnCategory.SQL_INJECTION, Severity.MEDIUM, "MEDIUM",
+                                      "SQL via tagged template. Verify the tag function handles escaping.")
 
             # Array.join() to build SQL (evasion technique)
             # Only flag if there's actual SQL execution context, not just DOM selectors
@@ -2949,14 +2997,33 @@ class JavaScriptAnalyzer:
                     # Check if URL uses safe config constants
                     uses_safe_constant = any(re.search(const, line) for const in safe_url_constants)
 
+                    # Check for numeric-only interpolation (e.g., /resources/${id} where id is numeric)
+                    # These are low risk since integers can't contain SSRF payloads
+                    interps = re.findall(r'\$\{([^}]+)\}', line)
+                    numeric_id_patterns = [
+                        r'^id$', r'^.*Id$', r'^.*_id$', r'^\d+$',  # Common ID patterns
+                        r'^item$', r'^index$', r'^page$', r'^limit$', r'^offset$',  # Numeric params
+                        r'^count$', r'^num$', r'^number$', r'^position$',  # Numeric values
+                    ]
+                    is_numeric_only_interp = interps and all(
+                        any(re.match(pat, interp.strip(), re.IGNORECASE) for pat in numeric_id_patterns)
+                        for interp in interps
+                    )
+
                     if has_taint or has_req_input:
                         self._add_finding(i, "SSRF - HTTP request with user-controlled URL",
                                           VulnCategory.SSRF, Severity.HIGH, "HIGH",
                                           "User-controlled URL in HTTP request.")
                     elif ('${' in line or '" +' in line) and not uses_safe_constant:
-                        self._add_finding(i, "SSRF - HTTP request with dynamic URL",
-                                          VulnCategory.SSRF, Severity.MEDIUM, "MEDIUM",
-                                          "HTTP request with dynamic URL construction.")
+                        if is_numeric_only_interp:
+                            self._add_finding(i, "SSRF - HTTP request with numeric ID in URL (lower risk)",
+                                              VulnCategory.SSRF, Severity.LOW, "LOW",
+                                              "URL uses numeric ID interpolation. Lower risk since integers "
+                                              "can't contain SSRF payloads. Verify ID is validated as integer.")
+                        else:
+                            self._add_finding(i, "SSRF - HTTP request with dynamic URL",
+                                              VulnCategory.SSRF, Severity.MEDIUM, "MEDIUM",
+                                              "HTTP request with dynamic URL construction.")
 
     def _check_deserialization(self):
         """Check for deserialization vulnerabilities - including evasion techniques."""
@@ -2993,6 +3060,20 @@ class JavaScriptAnalyzer:
 
             for pattern, vuln_name in high_patterns:
                 if re.search(pattern, line):
+                    # Skip yaml.load with SAFE_SCHEMA - this is safe usage
+                    if 'yaml' in vuln_name.lower() and 'load' in vuln_name.lower():
+                        # Check for safe schema patterns: yaml.load(data, { schema: yaml.SAFE_SCHEMA })
+                        # or yaml.load(data, { schema: SAFE_SCHEMA })
+                        # or yaml.load(data, options) where options contains SAFE_SCHEMA
+                        safe_yaml_patterns = [
+                            r'SAFE_SCHEMA',          # yaml.SAFE_SCHEMA or SAFE_SCHEMA constant
+                            r'JSON_SCHEMA',          # JSON_SCHEMA is also safe
+                            r'FAILSAFE_SCHEMA',      # FAILSAFE_SCHEMA is safe
+                            r'safeLoad',             # Using safeLoad function instead
+                            r'schema\s*:\s*[\'"]?safe',  # schema: 'safe' or similar
+                        ]
+                        if any(re.search(safe_pat, line, re.IGNORECASE) for safe_pat in safe_yaml_patterns):
+                            continue  # Skip - this is safe
                     self._add_finding(i, vuln_name,
                                       VulnCategory.DESERIALIZATION, Severity.HIGH, "HIGH",
                                       "Unsafe deserialization detected.")
@@ -4119,9 +4200,22 @@ class JavaAnalyzer:
         """Check for SQL injection patterns."""
         sql_keywords = r'(?:SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|EXEC|EXECUTE)'
 
+        # Patterns that are NOT SQL - should be excluded from SQL injection detection
+        non_sql_patterns = [
+            r'Runtime\..*\.exec\s*\(',     # Runtime.getRuntime().exec() - command execution, not SQL
+            r'\.exec\s*\(\s*["\'](?:cat|ls|rm|cp|mv|chmod|chown|grep|awk|sed|find|curl|wget)',  # Shell commands
+            r'ProcessBuilder',              # Command execution
+            r'Process\s+\w+\s*=',           # Process variable assignment
+        ]
+
         for i, line in enumerate(self.source_lines, 1):
             stripped = line.strip()
             if stripped.startswith('//') or stripped.startswith('/*') or stripped.startswith('*'):
+                continue
+
+            # Skip lines that are command execution, not SQL
+            is_command_exec = any(re.search(pat, line) for pat in non_sql_patterns)
+            if is_command_exec:
                 continue
 
             # Pattern 1: executeQuery/execute with string concatenation
@@ -4142,7 +4236,16 @@ class JavaAnalyzer:
                                       description="SQL query uses string concatenation. Use PreparedStatement.")
 
             # Pattern 2: String building with SQL + tainted data
+            # Only flag for actual SQL keywords, not EXEC when it's command execution
             if re.search(sql_keywords, line, re.IGNORECASE) and '+' in line:
+                # Additional check: ensure it's SQL context, not command execution
+                # EXEC alone without other SQL keywords is likely command execution
+                has_real_sql = re.search(r'\b(?:SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|TABLE)\b', line, re.IGNORECASE)
+                has_only_exec = re.search(r'\bEXEC(?:UTE)?\b', line, re.IGNORECASE) and not has_real_sql
+
+                if has_only_exec:
+                    continue  # Skip - likely command execution, not SQL
+
                 is_tainted, taint_var = self._is_tainted(line)
                 if is_tainted:
                     self._add_finding(i, "SQL Injection - String concatenation with tainted data",
@@ -4153,6 +4256,21 @@ class JavaAnalyzer:
             if 'String.format' in line and re.search(sql_keywords, line, re.IGNORECASE):
                 is_tainted, taint_var = self._is_tainted(line)
                 if is_tainted:
+                    # Check if only integer format specifiers are used (%d, %i, %u, %x, %o)
+                    # These are much safer as they can't contain SQL injection payloads
+                    format_str_match = re.search(r'String\.format\s*\(\s*"([^"]*)"', line)
+                    if format_str_match:
+                        format_str = format_str_match.group(1)
+                        # Find all format specifiers
+                        format_specs = re.findall(r'%[^%\s]*[a-zA-Z]', format_str)
+                        # Integer-only specifiers (safe for SQL injection)
+                        int_only = all(re.match(r'%[-+0\s#]*\d*\.?\d*[dioxXu]', spec) for spec in format_specs if spec)
+                        if int_only and format_specs:
+                            self._add_finding(i, "SQL Injection - String.format with integer specifiers (lower risk)",
+                                              VulnCategory.SQL_INJECTION, Severity.MEDIUM, "LOW", taint_var,
+                                              "SQL with String.format using only integer format specifiers (%d/%i/%x). "
+                                              "Lower risk since integers can't contain SQL injection payloads.")
+                            continue  # Skip the critical finding
                     self._add_finding(i, "SQL Injection - String.format with tainted data",
                                       VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
                                       "SQL query uses String.format with user data.")
@@ -4194,10 +4312,25 @@ class JavaAnalyzer:
             # ProcessBuilder
             if re.search(r'new\s+ProcessBuilder\s*\(', line):
                 is_tainted, taint_var = self._is_tainted(line)
+
+                # Check for array/List argument pattern (safer - no shell interpretation)
+                # Pattern: new ProcessBuilder(Arrays.asList(...)) or new ProcessBuilder(cmd) where cmd is List
+                uses_array_list = re.search(
+                    r'new\s+ProcessBuilder\s*\(\s*(?:Arrays\.asList\s*\(|List\.of\s*\(|new\s+ArrayList|command[sS]?|args|argList|cmdList)',
+                    line
+                )
+
                 if is_tainted:
-                    self._add_finding(i, "Command Injection - ProcessBuilder with tainted input",
-                                      VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
-                                      "User-controlled data passed to ProcessBuilder.")
+                    if uses_array_list:
+                        # Lower confidence - array/List arguments don't go through shell
+                        self._add_finding(i, "Command Injection - ProcessBuilder with array/List (lower risk)",
+                                          VulnCategory.COMMAND_INJECTION, Severity.HIGH, "MEDIUM", taint_var,
+                                          "ProcessBuilder with array/List argument. Lower risk than shell execution "
+                                          "since no shell interpretation occurs. Verify arguments are validated.")
+                    else:
+                        self._add_finding(i, "Command Injection - ProcessBuilder with tainted input",
+                                          VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                          "User-controlled data passed to ProcessBuilder.")
 
                 # Check for shell execution pattern: ProcessBuilder("/bin/sh", "-c", cmd)
                 # or ProcessBuilder("cmd.exe", "/c", cmd)
@@ -4245,6 +4378,7 @@ class JavaAnalyzer:
         ois_vars = set()
         base64_decoded_vars = set()
         stream_vars = set()
+        validating_ois_vars = set()  # Track ValidatingObjectInputStream (safe deserialization)
 
         for i, line in enumerate(self.source_lines, 1):
             stripped = line.strip()
@@ -4275,6 +4409,14 @@ class JavaAnalyzer:
                 if var_match:
                     ois_vars.add(var_match.group(1))
 
+            # Track ValidatingObjectInputStream - Apache Commons IO safe deserialization
+            # Pattern: ValidatingObjectInputStream vois = new ValidatingObjectInputStream(...)
+            # With: vois.accept(AllowedClass.class, AnotherClass.class)
+            if re.search(r'ValidatingObjectInputStream', line):
+                var_match = re.search(r'(?:ValidatingObjectInputStream)\s+(\w+)\s*=', line)
+                if var_match:
+                    validating_ois_vars.add(var_match.group(1))
+
             # Detect .readObject() calls - the critical deserialization sink
             readobj_match = re.search(r'(\w+)\s*\.\s*readObject\s*\(\s*\)', line)
             if readobj_match:
@@ -4283,6 +4425,21 @@ class JavaAnalyzer:
 
                 # Check broader context for deserialization patterns
                 context = '\n'.join(self.source_lines[max(0, i-15):i+3])
+
+                # Check for safe deserialization patterns
+                # 1. ValidatingObjectInputStream with .accept() whitelist
+                uses_validating_ois = (
+                    var_name in validating_ois_vars or
+                    re.search(r'ValidatingObjectInputStream', context)
+                )
+                has_accept_whitelist = re.search(r'\.accept\s*\(', context)
+                if uses_validating_ois and has_accept_whitelist:
+                    continue  # Safe - ValidatingObjectInputStream with accept() whitelist
+
+                # 2. ObjectInputFilter (Java 9+)
+                has_object_filter = re.search(r'ObjectInputFilter|setObjectInputFilter|createFilter', context)
+                if has_object_filter:
+                    continue  # Safe - using ObjectInputFilter
 
                 # Look for dangerous patterns in context
                 has_ois = re.search(r'ObjectInputStream|extends\s+ObjectInputStream', context)
@@ -4330,6 +4487,18 @@ class JavaAnalyzer:
                 # Check if this is a SnakeYAML context (Yaml instance or import)
                 is_snakeyaml = re.search(r'import\s+org\.yaml\.snakeyaml|Yaml\s+\w+\s*=|new\s+Yaml\s*\(', context)
                 if is_snakeyaml:
+                    # Check if SafeConstructor is used - this is SAFE
+                    # Patterns: new Yaml(new SafeConstructor()), Yaml yaml = new Yaml(safeConstructor)
+                    safe_constructor_patterns = [
+                        r'new\s+Yaml\s*\(\s*new\s+SafeConstructor',  # Inline SafeConstructor
+                        r'new\s+Yaml\s*\(\s*\w*[sS]afe\w*\s*\)',    # Variable with 'safe' in name
+                        r'SafeConstructor',                          # SafeConstructor anywhere in context
+                        r'BaseConstructor',                          # BaseConstructor (can be restricted)
+                    ]
+                    uses_safe_constructor = any(re.search(pat, context) for pat in safe_constructor_patterns)
+                    if uses_safe_constructor:
+                        continue  # Skip - SafeConstructor is safe
+
                     is_tainted, taint_var = self._is_tainted(line)
                     if is_tainted:
                         self._add_finding(i, "Insecure Deserialization - SnakeYAML.load() with untrusted data",
@@ -4563,6 +4732,10 @@ class JavaAnalyzer:
                 # Check if any Base64 decoded var is used in eval
                 uses_decoded = any(re.search(rf'\b{re.escape(var)}\b', line) for var in base64_decoded_vars)
 
+                # Check if eval argument is a hardcoded string literal (lower risk)
+                # Pattern: .eval("...") or .eval('...')
+                eval_with_literal = re.search(r'\.eval\s*\(\s*["\'][^"\']*["\']\s*\)', line)
+
                 if has_script_engine:
                     if uses_decoded:
                         self._add_finding(i, "Code Injection - ScriptEngine.eval with Base64-decoded payload",
@@ -4574,9 +4747,16 @@ class JavaAnalyzer:
                                           VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
                                           "User-controlled data in ScriptEngine.eval() enables code execution.")
                     elif re.search(r'\.eval\s*\(', line):
-                        self._add_finding(i, "Code Injection - ScriptEngine.eval usage",
-                                          VulnCategory.CODE_INJECTION, Severity.HIGH, "MEDIUM",
-                                          description="ScriptEngine.eval() detected. Verify input is not user-controlled.")
+                        if eval_with_literal:
+                            # Hardcoded string literal - much lower risk
+                            self._add_finding(i, "Code Injection - ScriptEngine.eval with hardcoded script (lower risk)",
+                                              VulnCategory.CODE_INJECTION, Severity.LOW, "LOW",
+                                              description="ScriptEngine.eval() with hardcoded string literal. "
+                                                          "Lower risk since script content is not user-controlled.")
+                        else:
+                            self._add_finding(i, "Code Injection - ScriptEngine.eval usage",
+                                              VulnCategory.CODE_INJECTION, Severity.HIGH, "MEDIUM",
+                                              description="ScriptEngine.eval() detected. Verify input is not user-controlled.")
 
             # Detect ScriptEngineManager chain pattern
             # Pattern: new ScriptEngineManager().getEngineByName("javascript").eval(...)
@@ -4848,6 +5028,18 @@ class JavaAnalyzer:
 
             # XPath.evaluate() sink with string concatenation
             if re.search(r'\.evaluate\s*\(.*\+', line):
+                # Check for integer-only position patterns (safe from injection)
+                # Pattern: "//item[" + pos + "]" where pos is an integer variable
+                int_position_var_names = r'(?:pos|position|index|idx|i|n|num|count|page|offset|limit)'
+                int_position_patterns = [
+                    rf'\+\s*{int_position_var_names}\s*\+',  # + pos +
+                    rf'\+\s*{int_position_var_names}\s*[,)]',  # + pos, or + pos)
+                    r'Integer\.(?:parseInt|valueOf)',  # Integer.parseInt() or valueOf
+                    r'\(\s*int\s*\)',  # (int) cast
+                    r'\["\s*\+\s*\w+\s*\+\s*"?\]',  # ["+ var +"] bracket position pattern
+                ]
+                is_int_position = any(re.search(p, line, re.IGNORECASE) for p in int_position_patterns)
+
                 is_db, db_var, source = self._is_db_sourced(line)
                 if is_db:
                     self._add_finding(
@@ -4858,11 +5050,20 @@ class JavaAnalyzer:
                     )
                 elif re.search(r'\.evaluate\s*\(\s*["\'].*\+', line):
                     # Check for any variable in concat
-                    self._add_finding(
-                        i, "XPath Injection - String concatenation in evaluate()",
-                        VulnCategory.XPATH_INJECTION, Severity.HIGH, "MEDIUM",
-                        "XPath expression built with string concatenation."
-                    )
+                    if is_int_position:
+                        # Integer-only position - lower risk
+                        self._add_finding(
+                            i, "XPath Injection - Integer position in evaluate() (lower risk)",
+                            VulnCategory.XPATH_INJECTION, Severity.MEDIUM, "LOW",
+                            "XPath expression built with integer position variable. "
+                            "Lower risk since integers cannot contain XPath injection payloads."
+                        )
+                    else:
+                        self._add_finding(
+                            i, "XPath Injection - String concatenation in evaluate()",
+                            VulnCategory.XPATH_INJECTION, Severity.HIGH, "MEDIUM",
+                            "XPath expression built with string concatenation."
+                        )
 
             # XPath.compile() sink with concatenation
             if re.search(r'\.compile\s*\(.*\+', line):
@@ -5577,14 +5778,53 @@ class PHPAnalyzer:
             if is_eloquent_safe:
                 continue
 
+            # Skip PDO prepared statements with ? placeholders or :named placeholders
+            # Pattern: $pdo->prepare("SELECT * FROM users WHERE id = ?")
+            # Pattern: $pdo->prepare("SELECT * FROM users WHERE id = :id")
+            if re.search(r'->\s*prepare\s*\(\s*["\']', line):
+                # Check if the SQL string contains ? placeholder or :named placeholder (parameterized query)
+                prepare_match = re.search(r'->\s*prepare\s*\(\s*["\']([^"\']*)["\']', line)
+                if prepare_match:
+                    sql_content = prepare_match.group(1)
+                    if '?' in sql_content or re.search(r':\w+', sql_content):
+                        continue  # Safe: prepared statement with placeholders
+
             # Direct query with concatenation
             has_sql_func = re.search(sql_funcs, line)
             has_sql_keyword = re.search(sql_keywords, line, re.IGNORECASE)
             has_sql_from_where = re.search(sql_from_where, line, re.IGNORECASE)
 
             if has_sql_func or has_sql_keyword or has_sql_from_where:
+                # Skip static SQL queries with no variable interpolation
+                # Pattern: $query = "SELECT * FROM users WHERE active = 1";
+                if re.search(r'=\s*["\'][^"\']*["\'];?\s*$', line):
+                    # Check if the string contains any $ variable or concatenation
+                    string_match = re.search(r'=\s*["\']([^"\']*)["\']', line)
+                    if string_match:
+                        sql_content = string_match.group(1)
+                        # If no $ variables in the SQL string, it's static and safe
+                        if not re.search(r'\$\w+', sql_content):
+                            continue  # Safe: static query
+
                 is_tainted, taint_var = self._is_tainted(line)
                 has_concat = '.' in line or '+' in line or re.search(r'\$\w+', line)
+
+                # Skip sprintf with only integer format specifiers (%d, %i, %u, %x, %o)
+                # These are safe since integers can't contain SQL injection payloads
+                if re.search(r'sprintf\s*\(', line):
+                    format_str_match = re.search(r'sprintf\s*\(\s*["\']([^"\']*)["\']', line)
+                    if format_str_match:
+                        format_str = format_str_match.group(1)
+                        # Find all format specifiers
+                        format_specs = re.findall(r'%[^%\s]*[a-zA-Z]', format_str)
+                        # Integer-only specifiers (safe for SQL injection)
+                        uses_int_only = format_specs and all(re.match(r'%[-+0\s#\']*\d*\.?\d*[dioxXu]', spec) for spec in format_specs)
+                        if uses_int_only and is_tainted:
+                            self._add_finding(i, "SQL Injection - sprintf with integer format (lower risk)",
+                                              VulnCategory.SQL_INJECTION, Severity.MEDIUM, "LOW", taint_var,
+                                              "SQL with sprintf using only integer format specifiers (%d/%i/%x). "
+                                              "Lower risk since integers can't contain SQL injection payloads.")
+                            continue  # Skip the critical finding
 
                 if is_tainted and (has_sql_func or has_sql_keyword or has_sql_from_where):
                     self._add_finding(i, "SQL Injection - Query with tainted data",
@@ -5592,12 +5832,21 @@ class PHPAnalyzer:
                                       "User input directly in SQL query.")
 
     def _check_command_injection(self):
-        cmd_funcs = r'\b(system|exec|shell_exec|passthru|popen|proc_open|pcntl_exec|eval)\s*\('
+        # Note: eval is handled separately in _check_code_injection
+        cmd_funcs = r'\b(system|exec|shell_exec|passthru|popen|proc_open|pcntl_exec)\s*\('
 
         for i, line in enumerate(self.source_lines, 1):
             if line.strip().startswith('//'):
                 continue
             if re.search(cmd_funcs, line):
+                # Skip if escapeshellcmd OR escapeshellarg are used (safe patterns)
+                # escapeshellarg: escapes a single argument to be passed to shell
+                # escapeshellcmd: escapes shell metacharacters in entire command
+                has_escapeshellcmd = re.search(r'escapeshellcmd\s*\(', line)
+                has_escapeshellarg = re.search(r'escapeshellarg\s*\(', line)
+                if has_escapeshellcmd or has_escapeshellarg:
+                    continue  # Safe: escape function used
+
                 is_tainted, taint_var = self._is_tainted(line)
                 if is_tainted:
                     self._add_finding(i, "Command Injection - Shell function with tainted data",
@@ -5752,6 +6001,15 @@ class PHPAnalyzer:
 
             # eval()
             if re.search(r'\beval\s*\(', line):
+                # Skip static eval with no variable interpolation
+                # Pattern: eval('static code'); or eval("static code");
+                static_eval_match = re.search(r'eval\s*\(\s*(["\'])([^"\']*)\1\s*\)', line)
+                if static_eval_match:
+                    eval_content = static_eval_match.group(2)
+                    # If no $ variables in the eval string, it's static and safe
+                    if not re.search(r'\$\w+', eval_content):
+                        continue  # Safe: static eval
+
                 is_tainted, taint_var = self._is_tainted(line)
                 if is_tainted:
                     self._add_finding(i, "Code Injection - eval() with tainted data",
@@ -5856,6 +6114,21 @@ class PHPAnalyzer:
                 if uses_safe_constant:
                     continue
 
+                # Check for allowlist validation patterns in preceding lines
+                # Look back up to 10 lines for in_array or switch/case validation
+                context_start = max(0, i - 10)
+                context_lines = '\n'.join(self.source_lines[context_start:i])
+
+                # Safe patterns: in_array check, switch statement, or basename usage
+                allowlist_patterns = [
+                    r'in_array\s*\(\s*\$\w+\s*,',  # in_array($var, ...)
+                    r'switch\s*\(\s*\$\w+\s*\)',   # switch($var)
+                    r'basename\s*\(',              # basename() sanitization
+                ]
+                has_allowlist = any(re.search(p, context_lines) for p in allowlist_patterns)
+                if has_allowlist:
+                    continue  # Safe: allowlist validation detected
+
                 is_tainted, taint_var = self._is_tainted(line)
                 if is_tainted:
                     self._add_finding(i, "File Inclusion - LFI/RFI with tainted data",
@@ -5867,15 +6140,36 @@ class PHPAnalyzer:
             if line.strip().startswith('//'):
                 continue
             if re.search(r'\bunserialize\s*\(', line):
+                # Check for safe unserialize patterns in PHP 7+
+                # unserialize($data, ['allowed_classes' => false])
+                # unserialize($data, ['allowed_classes' => []])
+                # unserialize($data, ['allowed_classes' => ['SafeClass']])  (restricted classes)
+                # unserialize($data, array('allowed_classes' => false))
+                safe_unserialize_patterns = [
+                    r'unserialize\s*\([^,]+,\s*\[\s*[\'"]allowed_classes[\'"]\s*=>\s*false\s*\]',
+                    r'unserialize\s*\([^,]+,\s*\[\s*[\'"]allowed_classes[\'"]\s*=>\s*\[',  # any array (restricted classes)
+                    r'unserialize\s*\([^,]+,\s*array\s*\(\s*[\'"]allowed_classes[\'"]\s*=>\s*false\s*\)',
+                    r'unserialize\s*\([^,]+,\s*array\s*\(\s*[\'"]allowed_classes[\'"]\s*=>\s*array\s*\(',
+                    r'allowed_classes[\'"]?\s*=>\s*false',  # Check if anywhere in the call
+                    r'allowed_classes[\'"]?\s*=>\s*\[',     # Check for array of allowed classes
+                ]
+                is_safe_unserialize = any(re.search(pat, line, re.IGNORECASE) for pat in safe_unserialize_patterns)
+
+                if is_safe_unserialize:
+                    # Safe usage - allowed_classes restricts object instantiation
+                    continue  # Skip flagging
+
                 is_tainted, taint_var = self._is_tainted(line)
                 if is_tainted:
                     self._add_finding(i, "Insecure Deserialization - unserialize with tainted data",
                                       VulnCategory.DESERIALIZATION, Severity.CRITICAL, "HIGH", taint_var,
-                                      "User input passed to unserialize() can lead to RCE.")
+                                      "User input passed to unserialize() can lead to RCE. "
+                                      "Use unserialize($data, ['allowed_classes' => false]) for safety.")
                 else:
                     self._add_finding(i, "Insecure Deserialization - unserialize usage",
                                       VulnCategory.DESERIALIZATION, Severity.HIGH, "MEDIUM",
-                                      description="unserialize() detected. Verify data source.")
+                                      description="unserialize() detected. Verify data source. "
+                                      "Consider using ['allowed_classes' => false] option.")
 
     def _check_ssrf(self):
         url_funcs = r'\b(file_get_contents|curl_init|curl_setopt|fopen|readfile|get_headers)\s*\('
@@ -6056,13 +6350,32 @@ class PHPAnalyzer:
 
             # sprintf SQL patterns
             if re.search(r'sprintf\s*\(\s*["\'](?:SELECT|INSERT|UPDATE|DELETE)', line, re.IGNORECASE):
+                # Check if only integer format specifiers are used (%d, %i, %u, %x, %o)
+                # These are much safer as they can't contain SQL injection payloads
+                format_str_match = re.search(r'sprintf\s*\(\s*["\']([^"\']*)["\']', line)
+                uses_int_only = False
+                if format_str_match:
+                    format_str = format_str_match.group(1)
+                    # Find all format specifiers
+                    format_specs = re.findall(r'%[^%\s]*[a-zA-Z]', format_str)
+                    # Integer-only specifiers (safe for SQL injection)
+                    uses_int_only = format_specs and all(re.match(r'%[-+0\s#\']*\d*\.?\d*[dioxXu]', spec) for spec in format_specs)
+
                 is_unser, var_name, source = self._is_unserialized(line)
                 if is_unser:
-                    self._add_finding(
-                        i, "2nd-Order SQLi - Unserialized value in sprintf SQL (Double-Unserialize)",
-                        VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH", var_name,
-                        f"Unserialized value from {source} formatted into SQL via sprintf."
-                    )
+                    if uses_int_only:
+                        self._add_finding(
+                            i, "2nd-Order SQLi - sprintf with integer format (lower risk)",
+                            VulnCategory.SQL_INJECTION, Severity.MEDIUM, "LOW", var_name,
+                            f"Unserialized value from {source} in sprintf SQL with integer specifiers only. "
+                            "Lower risk since integers can't contain SQL injection payloads."
+                        )
+                    else:
+                        self._add_finding(
+                            i, "2nd-Order SQLi - Unserialized value in sprintf SQL (Double-Unserialize)",
+                            VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH", var_name,
+                            f"Unserialized value from {source} formatted into SQL via sprintf."
+                        )
 
     def _check_xpath_injection(self):
         """Detect 2nd-order XPath injection in PHP.
@@ -6083,20 +6396,61 @@ class PHPAnalyzer:
             r'simplexml_load_.*->xpath\s*\(',
         ]
 
+        # SQL functions that should NOT be flagged as XPath injection
+        # These use ->query() but are SQL, not XPath
+        sql_function_patterns = [
+            r'\$pdo\s*->\s*query',           # PDO::query()
+            r'\$\w*db\w*\s*->\s*query',      # $db->query(), $mysqli_db->query()
+            r'\$\w*conn\w*\s*->\s*query',    # $conn->query(), $dbconn->query()
+            r'\$mysqli\w*\s*->\s*query',     # $mysqli->query()
+            r'\$\w*sql\w*\s*->\s*query',     # $sql->query()
+            r'mysqli_query\s*\(',            # mysqli_query() function
+            r'\$\w+\s*->\s*prepare\s*\(',    # Any ->prepare() is SQL, not XPath
+        ]
+
+        # Patterns indicating integer-only position variables (safe from XPath injection)
+        int_position_patterns = [
+            r'\[\s*\"\s*\.\s*\$(?:pos|position|index|idx|i|n|num|count)\s*\.\s*\"\s*\]',  # [" . $pos . "]
+            r'\[\s*\$(?:pos|position|index|idx|i|n|num|count)\s*\]',  # [$pos]
+            r'\[\s*\(\s*int\s*\)\s*\$',  # [(int)$var]
+            r'\[\s*intval\s*\(\s*\$',    # [intval($var)]
+            r'\[\s*\(\s*integer\s*\)\s*\$',  # [(integer)$var]
+        ]
+
         for i, line in enumerate(self.source_lines, 1):
             if line.strip().startswith('//') or line.strip().startswith('#'):
                 continue
 
             for sink_pattern in xpath_sinks:
                 if re.search(sink_pattern, line, re.IGNORECASE):
+                    # Skip SQL functions that have similar syntax to XPath sinks
+                    is_sql_function = any(re.search(sql_pat, line, re.IGNORECASE) for sql_pat in sql_function_patterns)
+                    if is_sql_function:
+                        continue
+
+                    # Check for integer-only position patterns (low risk)
+                    # Pattern: xpath("//item[" . $pos . "]") where $pos is numeric
+                    is_int_position = any(re.search(pat, line) for pat in int_position_patterns)
+                    # Also check context for parseInt/intval/(int) cast on variable
+                    context = '\n'.join(self.source_lines[max(0, i-5):i])
+                    has_int_cast_context = re.search(r'(?:intval|parseInt|\(\s*int\s*\)|\(\s*integer\s*\))\s*\(\s*\$\w+\s*\)', context)
+
                     # Check for direct tainted input
                     is_tainted, taint_var = self._is_tainted(line)
                     if is_tainted:
-                        self._add_finding(
-                            i, "XPath Injection - Query with tainted data",
-                            VulnCategory.XPATH_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
-                            "User input in XPath query. Payload can enumerate nodes or break out."
-                        )
+                        if is_int_position or has_int_cast_context:
+                            self._add_finding(
+                                i, "XPath Injection - Position index with validated integer (lower risk)",
+                                VulnCategory.XPATH_INJECTION, Severity.MEDIUM, "LOW", taint_var,
+                                "XPath with integer position index. Lower risk since integers can't contain "
+                                "XPath injection payloads. Verify the variable is properly cast/validated as integer."
+                            )
+                        else:
+                            self._add_finding(
+                                i, "XPath Injection - Query with tainted data",
+                                VulnCategory.XPATH_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
+                                "User input in XPath query. Payload can enumerate nodes or break out."
+                            )
                         break
 
                     # 2nd-order: DB-sourced values
@@ -8332,8 +8686,10 @@ def main():
     parser.add_argument('--output', choices=['text', 'json'], default='text',
                         help='Output format (default: text)')
     parser.add_argument('-o', '--output-file', help='Save report to file')
-    parser.add_argument('--min-confidence', choices=['HIGH', 'MEDIUM', 'LOW'], default='LOW',
-                        help='Minimum confidence level to report (default: LOW)')
+    parser.add_argument('--min-confidence', choices=['HIGH', 'MEDIUM', 'LOW'], default='HIGH',
+                        help='Minimum confidence level to report (default: HIGH)')
+    parser.add_argument('--all', '-a', action='store_true',
+                        help='Show all findings including LOW/MEDIUM confidence (equivalent to --min-confidence LOW)')
     parser.add_argument('--scan-all', action='store_true',
                         help='Scan all files including vendor libraries and minified files')
 
@@ -8357,9 +8713,10 @@ def main():
     scanner = ASTScanner(verbose=args.verbose, scan_all=args.scan_all)
     findings = scanner.scan(args.target)
 
-    # Filter by confidence
+    # Filter by confidence (--all overrides --min-confidence to show everything)
     conf_levels = {'HIGH': 3, 'MEDIUM': 2, 'LOW': 1}
-    min_conf = conf_levels[args.min_confidence]
+    min_confidence = 'LOW' if args.all else args.min_confidence
+    min_conf = conf_levels[min_confidence]
     findings = [f for f in findings if conf_levels.get(f.confidence, 0) >= min_conf]
     scanner.all_findings = findings
 
