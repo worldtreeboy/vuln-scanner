@@ -38,6 +38,7 @@ import ast
 import json
 import argparse
 import re
+import warnings
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Dict, Set, Optional, Tuple, Any, Union
@@ -45,6 +46,13 @@ from enum import Enum
 from datetime import datetime
 from collections import defaultdict
 import textwrap
+
+# Suppress deprecation warnings for ast.Str, ast.Num, etc. (removed in Python 3.14)
+warnings.filterwarnings('ignore', category=DeprecationWarning, message='.*ast\\.Str.*')
+warnings.filterwarnings('ignore', category=DeprecationWarning, message='.*ast\\.Num.*')
+warnings.filterwarnings('ignore', category=DeprecationWarning, message='.*ast\\.Bytes.*')
+warnings.filterwarnings('ignore', category=DeprecationWarning, message='.*ast\\.NameConstant.*')
+warnings.filterwarnings('ignore', category=DeprecationWarning, message='.*ast\\.Ellipsis.*')
 
 
 class Severity(Enum):

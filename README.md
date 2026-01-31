@@ -320,25 +320,28 @@ The following vulnerability types are **not** scanned:
 
 ### Multi-Language Test Validation
 
-The scanner has been validated against comprehensive test suites covering all vulnerability categories across 5 languages:
+The scanner has been validated against comprehensive test suites covering all vulnerability categories across 8 languages/frameworks:
 
-| Language | True Positives | Categories Covered |
-|----------|:--------------:|:-------------------|
-| **Java** | 30+ | SQL/HQL/NoSQL, Command, Code, XPath, XXE, XSLT, SSRF, SSTI, Deserialization |
-| **Python** | 35+ | SQL/NoSQL, Command, Code, XPath, XXE, SSRF, SSTI, Deserialization, Evasion |
-| **PHP** | 30+ | SQL/NoSQL, Command, Code, XPath, XXE, XSLT, SSRF, SSTI, Deserialization, Evasion |
-| **Ruby** | 25+ | SQL/NoSQL, Command, Code, XPath, XXE, SSRF, SSTI, Deserialization, Evasion |
-| **C#** | 30+ | SQL/NoSQL, Command, Code, XPath, XXE, XSLT, SSRF, SSTI, Deserialization, Evasion |
+| Language | Framework | True Positives | Categories Covered |
+|----------|-----------|:--------------:|:-------------------|
+| **Java** | Spring Boot, JPA/Hibernate | 50+ | SQL/HQL/NoSQL, Command, Code (SpEL, OGNL, MVEL), XPath, XXE, XSLT, SSRF, SSTI, Deserialization |
+| **Python** | Flask, Django | 35+ | SQL/NoSQL, Command, Code, XPath, XXE, SSRF, SSTI, Deserialization, Evasion |
+| **JavaScript** | Express.js, Node.js | 40+ | SQL/NoSQL, Command, Code (eval, vm), XPath, XXE, SSRF, SSTI, Deserialization |
+| **TypeScript** | NestJS, Express, TypeORM | 45+ | SQL/NoSQL, Command, Code, XPath, XXE, SSRF, SSTI, Deserialization |
+| **PHP** | Laravel, Symfony | 40+ | SQL/NoSQL, Command, Code, XPath, XXE, XSLT, SSRF, SSTI, Deserialization, Evasion |
+| **C#** | ASP.NET, Entity Framework | 35+ | SQL/NoSQL, Command, Code, XPath, XXE, XSLT, SSRF, SSTI, Deserialization, Evasion |
+| **Ruby** | Rails, ActiveRecord | 30+ | SQL/NoSQL, Command, Code, XPath, XXE, SSRF, SSTI, Deserialization, Evasion |
+| **Go** | GORM, net/http | 25+ | SQL, Command, Code (template), XPath, XXE, SSRF, SSTI, Deserialization |
 
 **Test categories include:**
 - SQL/NoSQL/HQL Injection (string concat, format, interpolation, 2nd-order)
-- Command Injection (system, exec, subprocess, ProcessBuilder)
-- Code Injection (eval, exec, ScriptEngine, SpEL, OGNL)
+- Command Injection (system, exec, subprocess, ProcessBuilder, child_process)
+- Code Injection (eval, exec, ScriptEngine, SpEL, OGNL, vm.runInContext)
 - XPath/XQuery Injection (XPath, SelectNodes, DOMXPath)
 - XXE & XSLT Attacks (XMLParser, DocumentBuilder, XslTransform)
-- SSRF (requests, HttpClient, cURL, Net::HTTP)
-- SSTI (Jinja2, Twig, ERB, Freemarker, Velocity)
-- Insecure Deserialization (pickle, unserialize, Marshal, BinaryFormatter, SnakeYAML)
+- SSRF (requests, HttpClient, cURL, Net::HTTP, axios, fetch)
+- SSTI (Jinja2, Twig, ERB, Freemarker, Velocity, Blade, EJS)
+- Insecure Deserialization (pickle, unserialize, Marshal, BinaryFormatter, SnakeYAML, node-serialize)
 
 ---
 
@@ -652,11 +655,18 @@ ast-scanner/
 ├── README.md
 ├── LICENSE
 └── test-files/
-    ├── xpath-2nd-order.java       # XPath injection tests
-    ├── hql-function-injection.java # HQL FINAL BOSS tests
-    ├── pandas-2nd-order.py        # Pandas df.query() tests
-    ├── php-double-unserialize.php # Double-unserialize tests
-    ├── criteria-api-injection.java # Criteria API tests
+    ├── vulnerability-tests-python.py     # Python/Flask/Django tests (TP/FP)
+    ├── vulnerability-tests-javascript.js # JavaScript/Express/Node.js tests
+    ├── vulnerability-tests-typescript.ts # TypeScript/NestJS/TypeORM tests
+    ├── vulnerability-tests-java.java     # Java/Spring core tests
+    ├── vulnerability-tests-spring.java   # Spring Boot/JPA/Hibernate tests
+    ├── vulnerability-tests-php.php       # PHP core tests
+    ├── vulnerability-tests-laravel.php   # Laravel/Symfony tests
+    ├── vulnerability-tests-csharp.cs     # C#/ASP.NET/Entity Framework tests
+    ├── vulnerability-tests-ruby.rb       # Ruby/Rails/ActiveRecord tests
+    ├── vulnerability-tests-go.go         # Go/GORM tests
+    ├── 2nd-order-*.java/php              # 2nd-order injection tests
+    ├── evasive-*.js/py/php               # Evasion technique tests
     └── ...
 ```
 
