@@ -993,11 +993,30 @@ class PythonTaintTracker(ast.NodeVisitor):
             if node.args:
                 tainted, source = self.is_tainted(node.args[0])
                 if tainted:
-                    self.add_finding(
-                        node, "Command Injection - os.system() with user input",
-                        VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, "HIGH", source,
-                        "User-controlled data passed to os.system() can lead to command injection."
-                    )
+                    # === Check for shlex.quote() sanitization ===
+                    # If the argument uses shlex.quote(), it's properly escaped
+                    arg = node.args[0]
+                    is_sanitized = False
+                    if isinstance(arg, ast.JoinedStr):  # f-string
+                        # Check each formatted value for shlex.quote
+                        for value in arg.values:
+                            if isinstance(value, ast.FormattedValue) and isinstance(value.value, ast.Call):
+                                call = value.value
+                                if isinstance(call.func, ast.Attribute) and call.func.attr == 'quote':
+                                    if isinstance(call.func.value, ast.Name) and call.func.value.id == 'shlex':
+                                        is_sanitized = True
+                                        break
+                                elif isinstance(call.func, ast.Name) and call.func.id == 'quote':
+                                    is_sanitized = True
+                                    break
+                    if is_sanitized:
+                        pass  # Skip - properly sanitized with shlex.quote
+                    else:
+                        self.add_finding(
+                            node, "Command Injection - os.system() with user input",
+                            VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, "HIGH", source,
+                            "User-controlled data passed to os.system() can lead to command injection."
+                        )
 
         if func_name in ('popen', 'popen2', 'popen3', 'popen4'):
             if node.args:
@@ -1221,11 +1240,18 @@ class PythonTaintTracker(ast.NodeVisitor):
                 if node.args:
                     tainted, source = self.is_tainted(node.args[0])
                     if tainted:
-                        self.add_finding(
-                            node, f"SSRF - {full_func_name}() with user-controlled URL",
-                            VulnCategory.SSRF, Severity.HIGH, "HIGH", source,
-                            "User-controlled URL can lead to Server-Side Request Forgery."
-                        )
+                        # === CRITICAL: Skip environment variables for SSRF ===
+                        # os.environ.get() and os.getenv() are CONFIG, not user input
+                        # URLs from config are intentional and not SSRF
+                        is_env_source = source and source.source_type in ('env', 'os.environ.get()', 'os.getenv()')
+                        if is_env_source:
+                            pass  # Skip - environment variables are config, not SSRF
+                        else:
+                            self.add_finding(
+                                node, f"SSRF - {full_func_name}() with user-controlled URL",
+                                VulnCategory.SSRF, Severity.HIGH, "HIGH", source,
+                                "User-controlled URL can lead to Server-Side Request Forgery."
+                            )
                     # Check for variable URL (non-literal)
                     elif isinstance(node.args[0], ast.Name):
                         var_name = node.args[0].id.lower()
@@ -3105,9 +3131,9 @@ class JavaScriptAnalyzer:
             (r'pug\s*\.\s*render\s*\(\s*(?!.*["\'])', "SSTI - Pug render with variable"),
             (r'pug\s*\.\s*compile\s*\(\s*(?!.*["\'])', "SSTI - Pug compile with variable"),
             (r'jade\s*\.\s*render\s*\(', "SSTI - Jade render"),
-            # Handlebars
-            (r'handlebars\s*\.\s*compile\s*\(\s*(?!.*["\'])', "SSTI - Handlebars compile with variable"),
-            (r'Handlebars\s*\.\s*compile\s*\(', "SSTI - Handlebars.compile"),
+            # Handlebars - only flag if first arg is NOT a string literal
+            (r'handlebars\s*\.\s*compile\s*\(\s*(?!["\'])', "SSTI - Handlebars compile with variable"),
+            (r'Handlebars\s*\.\s*compile\s*\(\s*(?!["\'])', "SSTI - Handlebars.compile with variable"),
             # Nunjucks
             (r'nunjucks\s*\.\s*renderString\s*\(', "SSTI - Nunjucks renderString"),
             (r'nunjucks\s*\.\s*compile\s*\(', "SSTI - Nunjucks compile"),
@@ -4245,7 +4271,25 @@ class JavaAnalyzer:
                 has_concat = '+' in line or 'concat' in line.lower() or 'format' in line.lower()
                 has_sql = re.search(sql_keywords, line, re.IGNORECASE)
 
+                # === CRITICAL: Skip PreparedStatement with parameterized queries ===
+                # PreparedStatement.executeQuery() with no args is SAFE (params already bound)
+                # Pattern: pstmt.executeQuery() where pstmt was prepared with ? placeholders
+                context = '\n'.join(self.source_lines[max(0, i-10):i])
+                is_prepared_statement = (
+                    # Check if context shows a prepareStatement with ? or :param placeholders
+                    re.search(r'prepareStatement\s*\([^)]*\?\s*', context) or
+                    re.search(r'prepareStatement\s*\([^)]*:\w+', context) or
+                    # Check for setString/setInt/setParameter calls (parameter binding)
+                    re.search(r'\.set(?:String|Int|Long|Float|Double|Boolean|Object|Parameter)\s*\(', context)
+                )
+                # executeQuery() with empty parens on PreparedStatement is SAFE
+                if is_prepared_statement and re.search(r'\.executeQuery\s*\(\s*\)', line):
+                    continue  # SAFE - PreparedStatement with no inline query
+
                 if is_tainted:
+                    # Additional check: skip if this is a PreparedStatement variable executing a parameterized query
+                    if is_prepared_statement:
+                        continue  # SAFE - parameterized query
                     self._add_finding(i, "SQL Injection - executeQuery with tainted input",
                                       VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
                                       "User-controlled data in SQL query execution.")
@@ -5460,6 +5504,9 @@ class PHPAnalyzer:
 
     def _track_variable_assignments(self):
         """Track variable assignments to propagate taint."""
+        # Track sanitized variables (escapeshellarg, escapeshellcmd, intval, etc.)
+        self.sanitized_vars = set()
+
         for i, line in enumerate(self.source_lines, 1):
             if line.strip().startswith('//') or line.strip().startswith('#'):
                 continue
@@ -5467,6 +5514,29 @@ class PHPAnalyzer:
             if match:
                 var_name = match.group(1)
                 rhs = match.group(2)
+
+                # Check if the variable is being sanitized (don't propagate taint)
+                sanitizers = [
+                    r'escapeshellarg\s*\(',   # Shell argument escaping
+                    r'escapeshellcmd\s*\(',   # Shell command escaping
+                    r'intval\s*\(',           # Integer cast
+                    r'\(int\)',               # Integer cast
+                    r'\(integer\)',           # Integer cast
+                    r'floatval\s*\(',         # Float cast
+                    r'\(float\)',             # Float cast
+                    r'htmlspecialchars\s*\(', # HTML escaping
+                    r'htmlentities\s*\(',     # HTML escaping
+                    r'addslashes\s*\(',       # SQL escaping (not ideal but reduces risk)
+                    r'mysqli_real_escape_string\s*\(',  # MySQL escaping
+                    r'pg_escape_string\s*\(',  # PostgreSQL escaping
+                ]
+                is_sanitized = any(re.search(san, rhs) for san in sanitizers)
+
+                if is_sanitized:
+                    self.sanitized_vars.add(var_name)
+                    # Don't propagate taint - variable is sanitized
+                    continue
+
                 for tainted in list(self.tainted_vars.keys()):
                     if re.search(rf'\${re.escape(tainted)}\b', rhs):
                         self.tainted_vars[var_name] = i
@@ -5657,7 +5727,23 @@ class PHPAnalyzer:
         line_clean = re.sub(r"'[^'\\]*(?:\\.[^'\\]*)*'", "''", line)
 
         for var in self.tainted_vars:
+            # Skip if variable has been sanitized
+            if hasattr(self, 'sanitized_vars') and var in self.sanitized_vars:
+                continue
             if re.search(rf'\${re.escape(var)}\b', line_clean):
+                # Also check if the variable in this specific use is sanitized
+                # e.g., system("cat " . escapeshellarg($var)) - the $var is sanitized inline
+                var_pattern = rf'\${re.escape(var)}\b'
+                # Check for inline sanitization
+                inline_sanitizers = [
+                    rf'escapeshellarg\s*\(\s*\${re.escape(var)}\s*\)',
+                    rf'escapeshellcmd\s*\(\s*\${re.escape(var)}\s*\)',
+                    rf'intval\s*\(\s*\${re.escape(var)}\s*\)',
+                    rf'\(int\)\s*\${re.escape(var)}\b',
+                ]
+                is_inline_sanitized = any(re.search(san, line) for san in inline_sanitizers)
+                if is_inline_sanitized:
+                    continue
                 return True, var
         # Check direct superglobal use
         if re.search(r'\$_(GET|POST|REQUEST|COOKIE|SERVER|FILES)\s*\[', line_clean):
@@ -7273,8 +7359,19 @@ class CSharpAnalyzer:
                 continue
 
             if re.search(r'DirectorySearcher|\.Filter\s*=', line):
+                # === Skip static LDAP filters (hardcoded strings) ===
+                # Safe: new DirectorySearcher("(&(objectClass=user)(active=TRUE))")
+                # Safe: searcher.Filter = "(&(objectClass=user)(active=TRUE))"
+                is_static_filter = re.search(r'DirectorySearcher\s*\(\s*"[^"$]*"\s*\)', line)
+                is_static_assignment = re.search(r'\.Filter\s*=\s*"[^"$]*"\s*;', line)
+                if is_static_filter or is_static_assignment:
+                    continue  # SAFE - static LDAP filter
+
                 is_tainted, taint_var = self._is_tainted(line)
-                if is_tainted:
+                # Also check for string concatenation or interpolation
+                has_concat = '+' in line or '$"' in line or 'string.Format' in line.lower()
+
+                if is_tainted and has_concat:
                     self._add_finding(i, "LDAP Injection - Filter with tainted data",
                                       VulnCategory.LDAP_INJECTION, Severity.HIGH, "HIGH", taint_var,
                                       "User input in LDAP filter.")
@@ -7313,23 +7410,31 @@ class CSharpAnalyzer:
             # Direct sink detection
             for sink in xpath_sinks:
                 if re.search(sink, line):
-                    is_tainted, taint_var = self._is_tainted(line)
-                    # Check context for concatenation
-                    context = '\n'.join(self.source_lines[max(0, i-5):i+1])
-                    has_concat = '+' in context or '$"' in context
+                    # === CRITICAL: Skip static XPath queries (string literals) ===
+                    # Pattern: .SelectNodes("literal string") - no interpolation
+                    # Safe: doc.SelectNodes("//user[@active='true']")
+                    # Unsafe: doc.SelectNodes($"//user[@name='{name}']")
+                    is_static_string = re.search(sink + r'\s*\(\s*"[^"$]*"\s*\)', line)
+                    is_static_verbatim = re.search(sink + r'\s*\(\s*@"[^"]*"\s*\)', line)
+                    if is_static_string or is_static_verbatim:
+                        continue  # SAFE - static XPath query
 
-                    if is_tainted:
+                    is_tainted, taint_var = self._is_tainted(line)
+                    # Check context for concatenation (only on the current line's argument)
+                    has_concat = '+' in line or '$"' in line
+
+                    if is_tainted and has_concat:
                         self._add_finding(i, "XPath Injection - Evaluate with tainted data",
                                           VulnCategory.XPATH_INJECTION, Severity.HIGH, "HIGH", taint_var,
                                           "User input in XPath query.")
-                    elif has_concat and re.search(r'XPath|\.Evaluate|\.Select', context, re.IGNORECASE):
-                        # Check if any tainted var is in context
-                        for var in self.tainted_vars:
-                            if re.search(rf'\b{re.escape(var)}\b', context):
-                                self._add_finding(i, "XPath Injection - Dynamic query construction",
-                                                  VulnCategory.XPATH_INJECTION, Severity.HIGH, "HIGH", var,
-                                                  "XPath query built with string concatenation containing user input.")
-                                break
+                    elif is_tainted:
+                        # Tainted but no obvious concatenation on this line - check context
+                        context = '\n'.join(self.source_lines[max(0, i-5):i+1])
+                        has_context_concat = '+' in context or '$"' in context
+                        if has_context_concat:
+                            self._add_finding(i, "XPath Injection - Evaluate with tainted data",
+                                              VulnCategory.XPATH_INJECTION, Severity.HIGH, "HIGH", taint_var,
+                                              "User input in XPath query.")
 
             # 2nd-Order XPath injection: Entity-sourced values
             for sink in xpath_sinks:
