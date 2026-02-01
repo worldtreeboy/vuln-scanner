@@ -647,9 +647,9 @@ python3 vulnhunter.py . --min-confidence HIGH
 
 ---
 
-## XSSHunter - XSS & Prototype Pollution Scanner
+## JSHunter - JavaScript Vulnerability Scanner
 
-**xsshunter.py** is a specialized AST-based scanner for detecting XSS and Prototype Pollution vulnerabilities in JavaScript (ES6+) and Node.js/Express.js applications.
+**jshunter.py** is a specialized AST-based scanner for detecting XSS, Prototype Pollution, Path Traversal (LFI), and Command Injection vulnerabilities in JavaScript (ES6+) and Node.js/Express.js applications.
 
 ### Features
 
@@ -659,6 +659,9 @@ python3 vulnhunter.py . --min-confidence HIGH
 | **Taint Tracking** | Source-to-sink data flow analysis across variable assignments, function calls, and transformations |
 | **Express.js Detection** | Detects XSS through `req.query`, `req.body`, `req.params` → `res.send()`, `res.render()` |
 | **Prototype Pollution** | For-in loops, Object.assign, spread operator, Object.defineProperty, function parameters |
+| **Path Traversal (LFI)** | Detects fs.readFile, fs.readFileSync, fs.createReadStream with tainted paths |
+| **Command Injection** | Detects child_process.exec, spawn, fork with tainted commands |
+| **Inter-procedural Analysis** | Tracks taint through wrapper functions like respond(), sendError() |
 | **Encoding Bypass Detection** | Tracks taint through toString, join, split, map, filter, reduce, and other transformations |
 
 ### Installation
@@ -672,16 +675,16 @@ pip3 install pyjsparser     # Fallback: ES5 only
 
 ```bash
 # Scan JavaScript file
-python3 xsshunter.py app.js
+python3 jshunter.py app.js
 
 # Scan Express.js project
-python3 xsshunter.py /path/to/express/app --verbose
+python3 jshunter.py /path/to/express/app --verbose
 
 # JSON output
-python3 xsshunter.py src/ --output json -o xss-report.json
+python3 jshunter.py src/ --output json -o vuln-report.json
 
 # Include medium/low confidence
-python3 xsshunter.py src/ --min-confidence MEDIUM
+python3 jshunter.py src/ --min-confidence MEDIUM
 ```
 
 ### Detection Categories
@@ -729,7 +732,7 @@ python3 xsshunter.py src/ --min-confidence MEDIUM
 
 ```
 ======================================================================
-XSSHunter Scan Report (AST-Based Analysis)
+JSHunter Scan Report (AST-Based Analysis)
 ======================================================================
 Files Scanned: 15
 Vulnerabilities Found: 8
@@ -775,7 +778,7 @@ Vulnerabilities Found: 8
 ```
 vulnhunter/
 ├── vulnhunter.py          # Multi-language SAST scanner
-├── xsshunter.py           # Specialized XSS/Prototype Pollution scanner
+├── jshunter.py            # Specialized JavaScript vulnerability scanner
 ├── README.md
 ├── LICENSE
 └── test-files/

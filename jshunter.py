@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """
-XSSHunter - AST-Based XSS and Prototype Pollution Scanner
-==========================================================
+JSHunter - AST-Based JavaScript Vulnerability Scanner
+======================================================
 A structural analysis scanner for JavaScript files using AST parsing.
 
 Features:
 - JavaScript AST parsing via esprima (ES6+) or pyjsparser (ES5)
 - Source-to-sink taint tracking
-- DOM XSS detection (reflected, stored, DOM-based)
+- XSS detection (reflected, DOM-based)
 - Prototype pollution detection
+- Path traversal (LFI/LFW) detection
+- Command injection detection
+- Inter-procedural taint flow analysis
 - Line-precise vulnerability reporting
 
 Requirements:
@@ -16,9 +19,9 @@ Requirements:
     pip install pyjsparser  # Fallback (ES5 only)
 
 Usage:
-    python3 xsshunter.py target.js
-    python3 xsshunter.py /path/to/project --verbose
-    python3 xsshunter.py app.js --output json -o report.json
+    python3 jshunter.py target.js
+    python3 jshunter.py /path/to/project --verbose
+    python3 jshunter.py app.js --output json -o report.json
 """
 
 import os
@@ -66,6 +69,8 @@ class VulnCategory(Enum):
     PROTOTYPE_POLLUTION = "Prototype Pollution"
     DANGEROUS_EVAL = "Dangerous Eval"
     OPEN_REDIRECT = "Open Redirect"
+    PATH_TRAVERSAL = "Path Traversal"
+    COMMAND_INJECTION = "Command Injection"
 
 
 @dataclass
@@ -223,6 +228,39 @@ EXPRESS_SINKS = {
     'send': (VulnCategory.REFLECTED_XSS, Severity.HIGH, 'CWE-79'),
     'end': (VulnCategory.REFLECTED_XSS, Severity.HIGH, 'CWE-79'),
     'render': (VulnCategory.REFLECTED_XSS, Severity.MEDIUM, 'CWE-79'),
+}
+
+# Node.js file system sinks (Path Traversal / LFI)
+FS_SINKS = {
+    'readFile': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
+    'readFileSync': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
+    'readdir': (VulnCategory.PATH_TRAVERSAL, Severity.HIGH, 'CWE-22'),
+    'readdirSync': (VulnCategory.PATH_TRAVERSAL, Severity.HIGH, 'CWE-22'),
+    'writeFile': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
+    'writeFileSync': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
+    'appendFile': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
+    'appendFileSync': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
+    'unlink': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
+    'unlinkSync': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
+    'rmdir': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
+    'rmdirSync': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
+    'stat': (VulnCategory.PATH_TRAVERSAL, Severity.MEDIUM, 'CWE-22'),
+    'statSync': (VulnCategory.PATH_TRAVERSAL, Severity.MEDIUM, 'CWE-22'),
+    'access': (VulnCategory.PATH_TRAVERSAL, Severity.MEDIUM, 'CWE-22'),
+    'accessSync': (VulnCategory.PATH_TRAVERSAL, Severity.MEDIUM, 'CWE-22'),
+    'createReadStream': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
+    'createWriteStream': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
+}
+
+# Node.js command execution sinks
+COMMAND_SINKS = {
+    'exec': (VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, 'CWE-78'),
+    'execSync': (VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, 'CWE-78'),
+    'spawn': (VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, 'CWE-78'),
+    'spawnSync': (VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, 'CWE-78'),
+    'execFile': (VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, 'CWE-78'),
+    'execFileSync': (VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, 'CWE-78'),
+    'fork': (VulnCategory.COMMAND_INJECTION, Severity.HIGH, 'CWE-78'),
 }
 
 # ============================================================================
@@ -1298,6 +1336,127 @@ class JSASTVisitor:
                             remediation="Escape HTML entities before including in response, or use res.json() for JSON data"
                         ))
 
+            # Node.js fs sinks: fs.readFile(), fs.readFileSync(), etc.
+            elif method_name in FS_SINKS and obj_str in ('fs', 'require("fs")', "require('fs')"):
+                if args:
+                    arg = args[0]
+                    taint = self.is_tainted(arg)
+                    if taint:
+                        line, col = self.get_node_location(node)
+                        if line == 0:
+                            line = self.find_line_for_pattern(f'.{method_name}(')
+                        category, severity, cwe = FS_SINKS[method_name]
+                        self.findings.append(Finding(
+                            file_path=self.file_path,
+                            line_number=line,
+                            column=col,
+                            node_type='CallExpression',
+                            vulnerability_name=f"Path Traversal via fs.{method_name}()",
+                            category=category,
+                            severity=severity,
+                            confidence='HIGH',
+                            description=f"Tainted data from '{taint.source_type}' used as file path in fs.{method_name}(). Attacker can read/write arbitrary files.",
+                            source=taint.source_code,
+                            sink=f"fs.{method_name}()",
+                            code_snippet=self.get_line_content(line),
+                            cwe_id=cwe,
+                            remediation="Validate and sanitize file paths. Use path.basename() or a whitelist of allowed paths."
+                        ))
+
+            # Node.js child_process sinks: exec(), spawn(), etc.
+            elif method_name in COMMAND_SINKS:
+                if args:
+                    arg = args[0]
+                    taint = self.is_tainted(arg)
+                    if taint:
+                        line, col = self.get_node_location(node)
+                        if line == 0:
+                            line = self.find_line_for_pattern(f'.{method_name}(')
+                        category, severity, cwe = COMMAND_SINKS[method_name]
+                        self.findings.append(Finding(
+                            file_path=self.file_path,
+                            line_number=line,
+                            column=col,
+                            node_type='CallExpression',
+                            vulnerability_name=f"Command Injection via {method_name}()",
+                            category=category,
+                            severity=severity,
+                            confidence='HIGH',
+                            description=f"Tainted data from '{taint.source_type}' used in command execution via {method_name}(). Attacker can execute arbitrary commands.",
+                            source=taint.source_code,
+                            sink=f"{method_name}()",
+                            code_snippet=self.get_line_content(line),
+                            cwe_id=cwe,
+                            remediation="Never pass user input directly to command execution. Use parameterized APIs or strict input validation."
+                        ))
+
+        # Inter-procedural: Check if calling a user-defined function with tainted args
+        # that eventually passes to a sink (runs for ALL calls, not just unmatched ones)
+        self._check_interprocedural_call(node, callee, args)
+
+    def _check_interprocedural_call(self, node: dict, callee: dict, args: list) -> None:
+        """
+        Check for inter-procedural taint flow:
+        When a function is called with tainted arguments, check if those args
+        flow to sinks inside the function.
+        """
+        # Get function name
+        func_name = None
+        if callee.get('type') == 'Identifier':
+            func_name = callee.get('name', '')
+        elif callee.get('type') == 'MemberExpression':
+            func_name = callee.get('property', {}).get('name', '')
+
+        if not func_name or not args:
+            return
+
+        # Check if any argument is tainted
+        tainted_arg_indices = []
+        for i, arg in enumerate(args):
+            taint = self.is_tainted(arg)
+            if taint:
+                tainted_arg_indices.append((i, taint))
+
+        if not tainted_arg_indices:
+            return
+
+        # Check if this function is known to pass its arg to a sink
+        # This is a simplified check - in practice would need full call graph analysis
+        dangerous_wrapper_patterns = {
+            'respond': [1],  # respond(res, data, ...) - data at index 1
+            'sendResponse': [0, 1],
+            'sendError': [0, 1],
+            'writeResponse': [0, 1],
+            'output': [0],
+            'render': [0, 1],
+            'sendData': [0, 1],
+        }
+
+        if func_name.lower() in [p.lower() for p in dangerous_wrapper_patterns.keys()]:
+            for idx, taint in tainted_arg_indices:
+                # Check if this arg index is potentially dangerous
+                line, col = self.get_node_location(node)
+                if line == 0:
+                    line = self.find_line_for_pattern(f'{func_name}(')
+
+                self.findings.append(Finding(
+                    file_path=self.file_path,
+                    line_number=line,
+                    column=col,
+                    node_type='CallExpression',
+                    vulnerability_name=f"Potential XSS via {func_name}()",
+                    category=VulnCategory.REFLECTED_XSS,
+                    severity=Severity.MEDIUM,
+                    confidence='MEDIUM',
+                    description=f"Tainted data from '{taint.source_type}' passed to function '{func_name}()' which may output to response. Review function implementation.",
+                    source=taint.source_code,
+                    sink=f"{func_name}()",
+                    code_snippet=self.get_line_content(line),
+                    cwe_id="CWE-79",
+                    remediation="Ensure the function properly escapes data before outputting to HTTP response."
+                ))
+                break  # Only report once per call
+
     def visit_NewExpression(self, node: dict) -> None:
         """Handle new expressions: new Function(tainted)"""
         callee = node.get('callee', {})
@@ -2008,7 +2167,7 @@ class RegexScanner:
 # Main Scanner Class
 # ============================================================================
 
-class XSSHunter:
+class JSHunter:
     """Main scanner orchestrating AST and regex analysis."""
 
     def __init__(self, verbose: bool = False, min_confidence: str = "HIGH"):
@@ -2265,7 +2424,7 @@ class XSSHunter:
         """Generate human-readable report."""
         lines = []
         lines.append("=" * 70)
-        lines.append("XSSHunter Scan Report (AST-Based Analysis)")
+        lines.append("JSHunter Scan Report (AST-Based Analysis)")
         lines.append("=" * 70)
         lines.append(f"Scan Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         lines.append(f"Files Scanned: {self.files_scanned}")
@@ -2357,17 +2516,17 @@ class XSSHunter:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='XSSHunter - AST-Based XSS and Prototype Pollution Scanner',
+        description='JSHunter - AST-Based JavaScript Vulnerability Scanner',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent('''
             Examples:
-              python3 xsshunter.py target.js
-              python3 xsshunter.py /path/to/project --verbose
-              python3 xsshunter.py app.js --output json -o report.json
-              python3 xsshunter.py src/ --min-confidence MEDIUM
+              python3 jshunter.py target.js
+              python3 jshunter.py /path/to/project --verbose
+              python3 jshunter.py app.js --output json -o report.json
+              python3 jshunter.py src/ --min-confidence MEDIUM
 
             Requirements:
-              pip install pyjsparser
+              pip install esprima  # ES6+ support
         ''')
     )
 
@@ -2380,14 +2539,14 @@ def main():
 
     args = parser.parse_args()
 
-    print(f"\n[*] XSSHunter - AST-Based XSS & Prototype Pollution Scanner")
+    print(f"\n[*] JSHunter - AST-Based JavaScript Vulnerability Scanner")
     parser_info = 'esprima (ES6+)' if HAS_ESPRIMA else ('pyjsparser (ES5)' if HAS_PYJSPARSER else 'Regex (fallback)')
     print(f"[*] Parser: {parser_info}")
     print(f"[*] Target: {args.target}")
     print(f"[*] Min Confidence: {args.min_confidence}")
     print()
 
-    scanner = XSSHunter(verbose=args.verbose, min_confidence=args.min_confidence)
+    scanner = JSHunter(verbose=args.verbose, min_confidence=args.min_confidence)
     scanner.scan(args.target)
 
     report = scanner.generate_report(args.output)
