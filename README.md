@@ -41,6 +41,10 @@
 
 ---
 
+> **Disclaimer:** This is a **hobby/learning project** built for fun and educational purposes. It is **NOT** intended to replace professional SAST tools like [Semgrep](https://semgrep.dev/), [CodeQL](https://codeql.github.com/), [Snyk](https://snyk.io/), or [SonarQube](https://www.sonarqube.org/). For production security scanning, please use established tools with active maintenance and comprehensive rule sets. Use this project to learn about static analysis concepts, experiment with vulnerability patterns, or as a starting point for your own security research.
+
+---
+
 ## Proven Results
 
 <p align="center">
@@ -146,9 +150,9 @@
 
 ---
 
-## What Makes AST-Scanner Different?
+## What Makes VulnHunter Different?
 
-Most SAST tools detect **1st-order injection** - where user input flows directly to a sink. **AST-Scanner** goes deeper, detecting **2nd-order injection** where payloads are:
+Most SAST tools detect **1st-order injection** - where user input flows directly to a sink. **VulnHunter** goes deeper, detecting **2nd-order injection** where payloads are:
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
@@ -397,7 +401,7 @@ The scanner tracks data from these **entity sources**:
 
 ## Evasion Detection
 
-AST-Scanner catches sophisticated evasion techniques:
+VulnHunter catches sophisticated evasion techniques:
 
 <details>
 <summary><b>Python: getattr Shadow Attack</b></summary>
@@ -521,7 +525,7 @@ console.log("Value: " + obj);  // toString() called implicitly
 
 ```
 ================================================================================
-                            AST-SCANNER REPORT
+                            VULNHUNTER REPORT
 ================================================================================
 Scan Date: 2026-01-25
 Files Scanned: 156
@@ -649,20 +653,36 @@ python3 vulnhunter.py . --min-confidence HIGH
 
 ## JSHunter - JavaScript Vulnerability Scanner
 
-**jshunter.py** is a specialized AST-based scanner for detecting XSS, Prototype Pollution, Path Traversal (LFI), and Command Injection vulnerabilities in JavaScript (ES6+) and Node.js/Express.js applications.
+<p align="center">
+  <img src="https://img.shields.io/badge/JavaScript-ES6+-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black" alt="ES6+">
+  <img src="https://img.shields.io/badge/Node.js-Express-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Express">
+  <img src="https://img.shields.io/badge/AST-Parsing-blue?style=for-the-badge" alt="AST">
+</p>
+
+**jshunter.py** is a specialized AST-based scanner for JavaScript (ES6+) and Node.js/Express.js applications.
+
+> **Note:** JSHunter provides **comprehensive detection** for **XSS** and **Prototype Pollution** vulnerabilities. Other vulnerability types (Path Traversal, Command Injection, etc.) have basic detection but are **not as comprehensive**. For full coverage, combine with other tools.
+
+### Core Strengths
+
+| Category | Coverage | Description |
+|----------|----------|-------------|
+| **XSS Detection** | Comprehensive | DOM XSS, Reflected XSS, template literals, tagged templates, jQuery sinks |
+| **Prototype Pollution** | Comprehensive | For-in loops, spread, Object.assign, defineProperty, deep merge, function params |
+| **Path Traversal** | Basic | fs.readFile, readFileSync, createReadStream |
+| **Command Injection** | Basic | child_process.exec, spawn, fork |
+| **Eval/Code Injection** | Basic | eval(), new Function(), setTimeout(string) |
 
 ### Features
 
 | Feature | Description |
 |---------|-------------|
-| **ES6+ Support** | Full ES6 syntax support via `esprima` (const, let, arrow functions, destructuring, template literals, spread operator) |
-| **Taint Tracking** | Source-to-sink data flow analysis across variable assignments, function calls, and transformations |
-| **Express.js Detection** | Detects XSS through `req.query`, `req.body`, `req.params` → `res.send()`, `res.render()` |
-| **Prototype Pollution** | For-in loops, Object.assign, spread operator, Object.defineProperty, function parameters |
-| **Path Traversal (LFI)** | Detects fs.readFile, fs.readFileSync, fs.createReadStream with tainted paths |
-| **Command Injection** | Detects child_process.exec, spawn, fork with tainted commands |
+| **ES6+ Support** | Full ES6 syntax via `esprima` (const, let, arrows, destructuring, template literals, spread) |
+| **Taint Tracking** | Source-to-sink data flow across assignments, function calls, and transformations |
+| **Express.js Detection** | `req.query`, `req.body`, `req.params` → `res.send()`, `res.render()` |
 | **Inter-procedural Analysis** | Tracks taint through wrapper functions like respond(), sendError() |
-| **Encoding Bypass Detection** | Tracks taint through toString, join, split, map, filter, reduce, and other transformations |
+| **Encoding Bypass Detection** | Tracks taint through toString, join, split, map, filter, reduce |
+| **Minified File Detection** | Warns when scanning minified/obfuscated code |
 
 ### Installation
 
