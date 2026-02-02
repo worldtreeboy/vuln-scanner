@@ -1923,6 +1923,13 @@ class RegexScanner:
             (r'\b(?:e|evt|event|message)\.data\b', 'postmessage'),
         ]
 
+        # Variable names that typically contain user-controlled/external data
+        # These indicate HIGH confidence when used as sink arguments
+        dangerous_var_patterns = [
+            r'\b(?:response|res|data|result|html|content|body|payload|input|text|msg|message)\b',
+            r'\b(?:user|param|query|arg|val|value|href|url|link|uri|path|src)\b',
+        ]
+
         # Sink patterns with severity
         sink_patterns = [
             (r'\.innerHTML\s*=', 'innerHTML', Severity.CRITICAL),
@@ -1935,12 +1942,31 @@ class RegexScanner:
             (r'\$\([^)]*\)\.html\s*\(', 'jQuery.html', Severity.CRITICAL),
             (r'dangerouslySetInnerHTML', 'dangerouslySetInnerHTML', Severity.CRITICAL),
             (r'v-html\s*=', 'v-html', Severity.CRITICAL),
+            (r'\bwindow\.open\s*\(', 'window.open', Severity.HIGH),
+            # jQuery selector injection: $('...' + userInput + '...')
+            (r'\$\s*\([^)]*\+[^)]*location\.', 'jQuery selector (location)', Severity.MEDIUM),
         ]
 
         for sink_pattern, sink_name, severity in sink_patterns:
             for match in re.finditer(sink_pattern, self.source_code, re.IGNORECASE):
                 line_num = self.get_line_number(match.start())
                 line_content = self.get_line_content(line_num)
+
+                # FALSE POSITIVE FIX: Skip location.href = 'static string' patterns
+                # These are safe because the destination is hardcoded, not user-controlled
+                if sink_name == 'location':
+                    # Check if assignment value is a string literal (safe)
+                    after_match = self.source_code[match.end():match.end()+200]
+                    # Pattern: = followed by optional whitespace then quote (string literal)
+                    if re.match(r"\s*['\"][^'\"]*['\"]", after_match):
+                        continue
+
+                # FALSE POSITIVE FIX: Skip window.open('static string') patterns
+                if sink_name == 'window.open':
+                    after_match = self.source_code[match.end():match.end()+200]
+                    # Pattern: ( followed by optional whitespace then quote (string literal as first arg)
+                    if re.match(r"\s*['\"][^'\"]*['\"]", after_match):
+                        continue
 
                 # Check if any source is on the same line or nearby
                 source_found = None
@@ -1955,21 +1981,57 @@ class RegexScanner:
 
                 confidence = 'HIGH' if source_found else 'MEDIUM'
 
+                # FALSE NEGATIVE FIX: Increase confidence for dangerous variable patterns
+                # Variables like 'response', 'data', 'input' etc. typically contain user data
+                if confidence == 'MEDIUM':
+                    # Get the argument/value being passed to the sink
+                    # For innerHTML = X, check X
+                    # For .html(X), check X
+                    rest_of_line = line_content[line_content.find(match.group(0)) if match.group(0) in line_content else 0:]
+
+                    for var_pattern in dangerous_var_patterns:
+                        if re.search(var_pattern, rest_of_line, re.IGNORECASE):
+                            confidence = 'HIGH'
+                            source_found = 'variable'
+                            break
+
+                    # Also check for empty string patterns like .html("") which are safe
+                    if sink_name == 'jQuery.html':
+                        # Pattern: .html("") or .html('') - safe clearing
+                        if re.search(r'\.html\s*\(\s*["\']["\']', line_content):
+                            continue
+                        # Pattern: .html() used as getter (no arguments, followed by comparison/property access)
+                        # e.g., .html() == "" or .html().length - these read HTML, not write it
+                        if re.search(r'\.html\s*\(\s*\)\s*(?:==|===|!=|!==|\.|\))', line_content):
+                            continue
+
+                # Determine category and CWE based on sink type
+                if sink_name in ('location', 'window.open'):
+                    vuln_category = VulnCategory.OPEN_REDIRECT
+                    vuln_name = f"Open Redirect via {sink_name}"
+                    cwe = "CWE-601"
+                    remediation = "Validate URLs against an allowlist of trusted domains before navigation"
+                else:
+                    vuln_category = VulnCategory.DOM_XSS
+                    vuln_name = f"DOM XSS via {sink_name}"
+                    cwe = "CWE-79"
+                    remediation = "Sanitize user input before use in this context"
+
                 self.findings.append(Finding(
                     file_path=self.file_path,
                     line_number=line_num,
                     column=match.start() - self.source_code.rfind('\n', 0, match.start()),
                     node_type='RegexMatch',
-                    vulnerability_name=f"DOM XSS via {sink_name}",
-                    category=VulnCategory.DOM_XSS,
+                    vulnerability_name=vuln_name,
+                    category=vuln_category,
                     severity=severity,
                     confidence=confidence,
                     description=f"Dangerous sink '{sink_name}' detected" + (f" with {source_found} source" if source_found else ""),
                     source=source_found,
                     sink=sink_name,
                     code_snippet=line_content,
-                    cwe_id="CWE-79",
-                    remediation="Sanitize user input before use in this context"
+                    cwe_id=cwe,
+                    remediation=remediation
                 ))
 
     def scan_prototype_pollution(self) -> None:
