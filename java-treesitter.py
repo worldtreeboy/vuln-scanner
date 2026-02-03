@@ -830,13 +830,27 @@ class JavaASTAnalyzer:
             called = self._get_called_method_name(mi)
 
             if called in ("readObject", "readUnshared"):
-                # Check if the stream is from tainted source
                 receiver = self._get_receiver(mi)
                 if receiver:
                     recv_text = node_text(receiver)
-                    # Skip if stream is ValidatingObjectInputStream (uses whitelist)
+
+                    # Skip readObject with arguments (Kryo-style readObject(input, type), not OIS)
+                    if called == "readObject":
+                        args_node = get_child_by_type(mi, "argument_list")
+                        if args_node and len(self._get_all_args(args_node)) > 0:
+                            continue
+
+                    # Skip XMLDecoder receivers — handled by dedicated XMLDecoder check
+                    if self._is_xml_decoder_var(recv_text, body):
+                        continue
+
+                    # Safe: ValidatingObjectInputStream (uses whitelist)
                     if self._is_validating_stream(recv_text, body):
                         continue
+                    # Safe: ObjectInputFilter configured on the stream (Java 9+)
+                    if self._has_object_input_filter(recv_text, body):
+                        continue
+
                     # Is the stream variable tainted or constructed from tainted data?
                     if tracker.is_tainted(recv_text) or self._stream_is_tainted(recv_text, body, tracker):
                         self._add_finding(
@@ -845,6 +859,16 @@ class JavaASTAnalyzer:
                             VulnCategory.DESERIALIZATION, Severity.CRITICAL, "HIGH",
                             tracker.get_taint_chain(recv_text),
                             "ObjectInputStream.readObject() called on user-controlled stream."
+                        )
+                    else:
+                        # No explicit taint but no filter — gadget chain risk (CWE-502)
+                        self._add_finding(
+                            line, 0,
+                            "Insecure Deserialization - readObject() without deserialization filter",
+                            VulnCategory.DESERIALIZATION, Severity.HIGH, "HIGH",
+                            description="readObject() called without ObjectInputFilter or "
+                                        "ValidatingObjectInputStream. Vulnerable to gadget chain "
+                                        "attacks regardless of data source (CWE-502)."
                         )
 
             # SnakeYAML: yaml.load(tainted)
@@ -860,7 +884,7 @@ class JavaASTAnalyzer:
                         self._add_finding(
                             line, 0,
                             "Insecure Deserialization - SnakeYAML without SafeConstructor",
-                            VulnCategory.DESERIALIZATION, Severity.HIGH, "MEDIUM",
+                            VulnCategory.DESERIALIZATION, Severity.HIGH, "HIGH",
                             description="SnakeYAML.load() without SafeConstructor allows arbitrary code execution."
                         )
 
@@ -889,6 +913,21 @@ class JavaASTAnalyzer:
                     description="ObjectMapper.enableDefaultTyping() enables polymorphic deserialization."
                 )
 
+            # Kryo: readClassAndObject() — polymorphic deserialization without class whitelist
+            if called == "readClassAndObject":
+                receiver = self._get_receiver(mi)
+                if receiver:
+                    recv_name = node_text(receiver)
+                    if not self._has_kryo_registration(recv_name, body):
+                        sev = Severity.CRITICAL if tracker.is_tainted(mi_text) else Severity.HIGH
+                        self._add_finding(
+                            line, 0,
+                            "Insecure Deserialization - Kryo readClassAndObject()",
+                            VulnCategory.DESERIALIZATION, sev, "HIGH",
+                            description="Kryo.readClassAndObject() without setRegistrationRequired(true) "
+                                        "allows arbitrary class instantiation."
+                        )
+
         # XMLDecoder
         for oc in object_creations:
             oc_text = node_text(oc)
@@ -898,10 +937,33 @@ class JavaASTAnalyzer:
                 if args and tracker.is_tainted(node_text(args)):
                     self._add_finding(
                         line, 0,
-                        "Insecure Deserialization - XMLDecoder",
+                        "Insecure Deserialization - XMLDecoder with untrusted data",
                         VulnCategory.DESERIALIZATION, Severity.CRITICAL, "HIGH",
                         description="XMLDecoder with user-controlled input allows arbitrary code execution."
                     )
+                elif args:
+                    # XMLDecoder from any source is dangerous — it executes arbitrary method calls
+                    self._add_finding(
+                        line, 0,
+                        "Insecure Deserialization - XMLDecoder",
+                        VulnCategory.DESERIALIZATION, Severity.HIGH, "HIGH",
+                        description="XMLDecoder can execute arbitrary method calls via crafted XML "
+                                    "regardless of data source."
+                    )
+
+        # Hessian / Burlap deserialization
+        for oc in object_creations:
+            oc_text = node_text(oc)
+            if re.search(r'(?:Hessian2?Input|BurlapInput)', oc_text):
+                line = get_node_line(oc)
+                args = get_child_by_type(oc, "argument_list")
+                sev = Severity.CRITICAL if (args and tracker.is_tainted(node_text(args))) else Severity.HIGH
+                self._add_finding(
+                    line, 0,
+                    "Insecure Deserialization - Hessian/Burlap",
+                    VulnCategory.DESERIALIZATION, sev, "HIGH",
+                    description="Hessian/Burlap deserialization allows arbitrary object instantiation."
+                )
 
         # Base64 decode followed by ObjectInputStream
         for mi in method_invocations:
@@ -926,11 +988,40 @@ class JavaASTAnalyzer:
                 if "ValidatingObjectInputStream" in oc_text:
                     return False
                 args = get_child_by_type(oc, "argument_list")
-                if args and tracker.is_tainted(node_text(args)):
+                if not args:
+                    continue
+                args_text = node_text(args)
+                # Direct tainted arg
+                if tracker.is_tainted(args_text):
                     return True
-                # Check for ByteArrayInputStream(taintedBytes)
-                if args and "ByteArrayInputStream" in node_text(args):
-                    return tracker.is_tainted(node_text(args))
+                # ByteArrayInputStream(taintedBytes)
+                if "ByteArrayInputStream" in args_text and tracker.is_tainted(args_text):
+                    return True
+                # Check if the inner stream variable was constructed from tainted source
+                # e.g., new ObjectInputStream(fis) where fis = new FileInputStream(taintedPath)
+                inner_vars = re.findall(r'\b([a-zA-Z_]\w*)\b', args_text)
+                for iv in inner_vars:
+                    if self._inner_stream_is_tainted(iv, body, tracker):
+                        return True
+        return False
+
+    def _inner_stream_is_tainted(self, var_name: str, body: Node, tracker: TaintTracker) -> bool:
+        """Check if a stream variable was constructed from a tainted source."""
+        if tracker.is_tainted(var_name):
+            return True
+        body_text = node_text(body)
+        # FileInputStream(taintedPath) / BufferedInputStream(taintedStream)
+        pat = rf'{re.escape(var_name)}\s*=\s*new\s+\w*(?:File|Buffered|Socket|URL)?\w*InputStream\s*\(([^)]+)\)'
+        m = re.search(pat, body_text)
+        if m:
+            constructor_arg = m.group(1).strip()
+            if tracker.is_tainted(constructor_arg):
+                return True
+        # socket.getInputStream(), url.openStream(), connection.getInputStream()
+        stream_pat = rf'{re.escape(var_name)}\s*=\s*(\w+)\s*\.\s*(?:getInputStream|openStream)\s*\('
+        m = re.search(stream_pat, body_text)
+        if m and tracker.is_tainted(m.group(1)):
+            return True
         return False
 
     def _is_validating_stream(self, var_name: str, body: Node) -> bool:
@@ -948,6 +1039,27 @@ class JavaASTAnalyzer:
         """Check if XStream has security configuration."""
         body_text = node_text(body)
         return bool(re.search(rf'{re.escape(xstream_var)}\s*\.\s*(?:allowTypes|setupDefaultSecurity|addPermission|allowTypesByWildcard)', body_text))
+
+    def _is_xml_decoder_var(self, var_name: str, body: Node) -> bool:
+        """Check if a variable was constructed as XMLDecoder."""
+        body_text = node_text(body)
+        return bool(re.search(rf'{re.escape(var_name)}\s*=\s*new\s+XMLDecoder', body_text))
+
+    def _has_object_input_filter(self, stream_var: str, body: Node) -> bool:
+        """Check if ObjectInputFilter is configured on the stream (Java 9+)."""
+        body_text = node_text(body)
+        # Pattern: stream.setObjectInputFilter(...)
+        if re.search(rf'{re.escape(stream_var)}\s*\.\s*setObjectInputFilter\s*\(', body_text):
+            return True
+        # Pattern: ObjectInputFilter.Config.setSerialFilter(...) — global JVM filter
+        if 'setSerialFilter' in body_text:
+            return True
+        return False
+
+    def _has_kryo_registration(self, kryo_var: str, body: Node) -> bool:
+        """Check if Kryo has setRegistrationRequired(true) — class whitelist mode."""
+        body_text = node_text(body)
+        return bool(re.search(rf'{re.escape(kryo_var)}\s*\.\s*setRegistrationRequired\s*\(\s*true\s*\)', body_text))
 
     # ========================================================================
     # SSRF Detection

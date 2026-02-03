@@ -219,16 +219,6 @@ PYTHON_SINKS = {
         'mako': ['Template', 'mako.template.Template'],
         'django': ['Template'],
     },
-    VulnCategory.SSRF: {
-        'requests': ['requests.get', 'requests.post', 'requests.put',
-                     'requests.delete', 'requests.patch', 'requests.head',
-                     'requests.options', 'requests.request'],
-        'urllib': ['urllib.request.urlopen', 'urllib.request.Request',
-                   'urllib.urlopen', 'urllib2.urlopen'],
-        'httpx': ['httpx.get', 'httpx.post', 'httpx.put', 'httpx.delete',
-                  'httpx.patch', 'httpx.AsyncClient'],
-        'aiohttp': ['aiohttp.ClientSession', 'session.get', 'session.post'],
-    },
     VulnCategory.XPATH_INJECTION: {
         'xpath': ['xpath', 'find', 'findall', 'findtext', 'iterfind'],
         'lxml': ['lxml.etree.XPath', 'etree.xpath'],
@@ -1255,35 +1245,6 @@ class PythonTaintTracker(ast.NodeVisitor):
                         "marshal.load/loads with user data is dangerous."
                     )
 
-        # ===== SSRF =====
-        ssrf_funcs = ['get', 'post', 'put', 'delete', 'patch', 'head', 'options', 'request', 'urlopen']
-        if func_name in ssrf_funcs:
-            if 'requests' in full_func_name or 'urllib' in full_func_name or 'httpx' in full_func_name:
-                if node.args:
-                    tainted, source = self.is_tainted(node.args[0])
-                    if tainted:
-                        # === CRITICAL: Skip environment variables for SSRF ===
-                        # os.environ.get() and os.getenv() are CONFIG, not user input
-                        # URLs from config are intentional and not SSRF
-                        is_env_source = source and source.source_type in ('env', 'os.environ.get()', 'os.getenv()')
-                        if is_env_source:
-                            pass  # Skip - environment variables are config, not SSRF
-                        else:
-                            self.add_finding(
-                                node, f"SSRF - {full_func_name}() with user-controlled URL",
-                                VulnCategory.SSRF, Severity.HIGH, "HIGH", source,
-                                "User-controlled URL can lead to Server-Side Request Forgery."
-                            )
-                    # Check for variable URL (non-literal)
-                    elif isinstance(node.args[0], ast.Name):
-                        var_name = node.args[0].id.lower()
-                        if any(hint in var_name for hint in ['url', 'uri', 'target', 'endpoint', 'link', 'href']):
-                            self.add_finding(
-                                node, f"SSRF - {full_func_name}() with variable URL",
-                                VulnCategory.SSRF, Severity.MEDIUM, "MEDIUM",
-                                description=f"URL from variable '{node.args[0].id}'. Verify URL is validated."
-                            )
-
         # ===== SSTI =====
         if func_name == 'Template' or 'Template' in full_func_name:
             if node.args:
@@ -1703,15 +1664,6 @@ class PythonTaintTracker(ast.NodeVisitor):
                         category=VulnCategory.DESERIALIZATION, severity=Severity.CRITICAL,
                         confidence="HIGH", description="pickle.loads with potentially obfuscated reference."
                     ))
-
-            # 14. urlopen with obfuscated reference
-            if re.search(r'\.urlopen\s*\(', line):
-                self.findings.append(Finding(
-                    file_path=self.file_path, line_number=i, col_offset=0,
-                    line_content=line, vulnerability_name="SSRF - urlopen call",
-                    category=VulnCategory.SSRF, severity=Severity.HIGH,
-                    confidence="MEDIUM", description="urlopen() may allow SSRF if URL is user-controlled."
-                ))
 
             # 15. f-string in lambda with SQL keywords
             if re.search(r'lambda.*f["\'].*(?:SELECT|INSERT|UPDATE|DELETE|FROM|WHERE)', line, re.IGNORECASE):

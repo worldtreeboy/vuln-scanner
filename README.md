@@ -104,7 +104,7 @@ Tracked sources include `repo.findById()`, `cursor.fetchone()`, `Model.findOne()
 | XPath/XQuery Injection | Yes | Yes | All 7 |
 | XXE & XSLT | Yes | - | All 7 |
 | SSTI | Yes | - | All 7 |
-| Insecure Deserialization | Yes | Double-unserialize | All 7 |
+| Insecure Deserialization (OIS, SnakeYAML, XStream, XMLDecoder, Jackson, Kryo, Hessian) | Yes | Double-unserialize | All 7 |
 | Expression Language (SpEL, OGNL, MVEL, EL) | Yes | - | Java |
 | Reflection Injection | Yes | - | Java |
 
@@ -157,7 +157,7 @@ python3 vulnhunter.py target/ [options]
 
 ### java-treesitter.py - Java AST Scanner
 
-Deep Java analysis using [tree-sitter](https://tree-sitter.github.io/) with **per-method taint scoping**. Covers 12 vulnerability categories including JNDI injection, mass assignment, and reflection injection. Framework-agnostic (Spring, Struts2, Servlets, plain Java).
+Deep Java analysis using [tree-sitter](https://tree-sitter.github.io/) with **per-method taint scoping**. Covers 12 vulnerability categories including JNDI injection, mass assignment, reflection injection, and comprehensive deserialization detection (ObjectInputStream, SnakeYAML, XStream, XMLDecoder, Jackson polymorphic typing, Kryo, Hessian/Burlap). Safe pattern recognition: `ValidatingObjectInputStream`, `ObjectInputFilter` (Java 9+), `SafeConstructor`, `setRegistrationRequired(true)`. Framework-agnostic (Spring, Struts2, Servlets, plain Java).
 
 ```bash
 pip3 install tree-sitter tree-sitter-java
