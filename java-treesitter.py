@@ -637,21 +637,33 @@ class JavaASTAnalyzer:
 
         method_invocations = find_nodes(body, "method_invocation")
 
-        # SQL execution methods
-        sql_methods = {
+        # SQL execution methods — unambiguous names (always SQL sinks)
+        sql_methods_unambiguous = {
             "createQuery", "createNativeQuery", "createSQLQuery",
-            "executeQuery", "executeUpdate", "execute",
+            "executeQuery", "executeUpdate",
             "prepareStatement", "prepareCall",
-            "query", "queryForList", "queryForObject", "queryForMap",
-            "update", "batchUpdate",
+            "queryForList", "queryForObject", "queryForMap",
         }
+        # Ambiguous names — only SQL sinks on known JDBC/JPA receivers
+        sql_methods_ambiguous = {"update", "batchUpdate", "execute", "query"}
+        sql_receiver_patterns = re.compile(
+            r'(?i)(?:jdbc|template|statement|stmt|pstmt|preparedStatement|'
+            r'entityManager|em|session|connection|conn|con|namedParameter|'
+            r'db|database)\b'
+        )
 
         for mi in method_invocations:
             mi_text = node_text(mi)
             # Get the method name being called
             called_method = self._get_called_method_name(mi)
-            if called_method not in sql_methods:
+            if called_method not in sql_methods_unambiguous and called_method not in sql_methods_ambiguous:
                 continue
+            # For ambiguous methods, require a known SQL receiver
+            if called_method in sql_methods_ambiguous:
+                receiver = self._get_receiver(mi)
+                receiver_text = node_text(receiver) if receiver else ""
+                if not sql_receiver_patterns.search(receiver_text):
+                    continue
 
             args = get_child_by_type(mi, "argument_list")
             if not args:
