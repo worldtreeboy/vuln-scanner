@@ -52,9 +52,9 @@ python3 vulnhunter.py project/ --output json -o report.json
 pip3 install tree-sitter tree-sitter-java
 python3 java-treesitter.py /path/to/java/project
 
-# JavaScript XSS/Prototype Pollution scanner
-pip3 install esprima
-python3 jshunter.py /path/to/js/project
+# JavaScript AST scanner (deeper analysis via tree-sitter)
+pip3 install tree-sitter tree-sitter-javascript
+python3 js-treesitter.py /path/to/js/project
 ```
 
 ---
@@ -107,7 +107,7 @@ Tracked sources include `repo.findById()`, `cursor.fetchone()`, `Model.findOne()
 | Expression Language (SpEL, OGNL, MVEL, EL) | Yes | - | Java |
 | Reflection Injection | Yes | - | Java |
 
-**Not detected:** XSS (use jshunter.py for JS), Path Traversal, Weak Crypto, Session Fixation, Prototype Pollution (use jshunter.py for JS).
+**Not detected:** XSS (use js-treesitter.py for JS), Path Traversal, Weak Crypto, Session Fixation, Prototype Pollution (use js-treesitter.py for JS).
 
 ---
 
@@ -117,7 +117,7 @@ Tracked sources include `repo.findById()`, `cursor.fetchone()`, `Model.findOne()
 |----------|------------|------------|---------|
 | **Java** | `.java` | Spring, JPA/Hibernate, Struts2, Servlets | vulnhunter.py (regex) or java-treesitter.py (AST) |
 | **C#** | `.cs` | ASP.NET, Entity Framework | vulnhunter.py |
-| **JavaScript** | `.js`, `.jsx` | Express, Mongoose, Sequelize | vulnhunter.py or jshunter.py (AST) |
+| **JavaScript** | `.js`, `.jsx` | Express, Mongoose, Sequelize | vulnhunter.py (regex) or js-treesitter.py (AST) |
 | **TypeScript** | `.ts`, `.tsx` | Node.js, TypeORM, NestJS | vulnhunter.py |
 | **Python** | `.py` | Flask, Django, SQLAlchemy, Pandas | vulnhunter.py |
 | **PHP** | `.php` | Laravel, PDO, mysqli | vulnhunter.py |
@@ -130,6 +130,7 @@ Tracked sources include `repo.findById()`, `cursor.fetchone()`, `Model.findOne()
 | Python | ~60% | ~10% | ~30% | Full AST via `ast.NodeVisitor` |
 | Java <sup>TS</sup> | **~85%** | - | ~15% | Tree-sitter per-method taint |
 | Java | - | ~45% | ~55% | Regex-based Spring annotation analysis |
+| JS/TS <sup>TS</sup> | **~85%** | - | ~15% | Tree-sitter file-level taint |
 | JS/TS | - | ~30% | ~70% | Regex source-sink tracking |
 | PHP | - | ~35% | ~65% | `$_GET`/`$_POST` variable tracking |
 | C# | - | ~40% | ~60% | Constructor flow, LINQ taint tunnel |
@@ -165,13 +166,13 @@ python3 java-treesitter.py target/ [options]
   --all                       Show all confidence levels
 ```
 
-### jshunter.py - JavaScript Scanner
+### js-treesitter.py - JavaScript AST Scanner
 
-Specialized AST-based scanner for **XSS** and **Prototype Pollution** with comprehensive coverage. Supports ES6+ via `esprima`, Express.js taint tracking, and encoding bypass detection.
+Deep JavaScript analysis using [tree-sitter](https://tree-sitter.github.io/) with **file-level taint tracking**. Covers 7 vulnerability categories: DOM XSS, Reflected XSS, Prototype Pollution, Dangerous Eval, Open Redirect, Path Traversal, Command Injection. Supports ES6+, Express.js, jQuery, and HTML inline scripts.
 
 ```bash
-pip3 install esprima
-python3 jshunter.py target/ [options]
+pip3 install tree-sitter tree-sitter-javascript
+python3 js-treesitter.py target/ [options]
   --output {text,json}        Output format
   -o, --output-file FILE      Save to file
   --min-confidence LEVEL      HIGH, MEDIUM, or LOW
@@ -201,7 +202,7 @@ python3 jshunter.py target/ [options]
 vulnhunter/
 ├── vulnhunter.py          # Multi-language SAST scanner (7 languages)
 ├── java-treesitter.py     # Java AST scanner (tree-sitter)
-├── jshunter.py            # JavaScript XSS/PP scanner (esprima)
+├── js-treesitter.py       # JavaScript AST scanner (tree-sitter)
 ├── requirements.txt
 └── test-files/            # Vulnerability test cases per language
 ```

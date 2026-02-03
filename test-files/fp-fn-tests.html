@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>jshunter.py FP/FN HTML Test Suite</title>
+    <!--
+    ============================================================================
+    FALSE POSITIVE / FALSE NEGATIVE test suite for HTML scanning (RegexScanner)
+    Each case is marked:
+      [FP-Hxxx] = False Positive – scanner should NOT flag this
+      [FN-Hxxx] = False Negative – scanner SHOULD flag this (may be missed)
+      [TP-Hxxx] = True Positive  – scanner SHOULD flag this (baseline check)
+    ============================================================================
+    -->
+</head>
+<body>
+
+<!-- ======================================================================= -->
+<!-- SECTION 1: TEMPLATE INJECTION – TRUE POSITIVES (baseline)               -->
+<!-- ======================================================================= -->
+
+<!-- [TP-H001] Handlebars unescaped output – CRITICAL XSS -->
+<div class="user-bio">
+    {{{ userBio }}}
+</div>
+
+<!-- [TP-H002] EJS unescaped output – CRITICAL XSS -->
+<div class="comment">
+    <%- comment %>
+</div>
+
+<!-- [TP-H003] Handlebars unescaped in attribute -->
+<img src="{{{ avatarUrl }}}">
+
+<!-- [TP-H004] EJS unescaped in attribute -->
+<a href="<%- redirectUrl %>">Click here</a>
+
+<!-- [TP-H005] javascript: URI in href -->
+<a href="javascript:alert(document.cookie)">XSS</a>
+
+<!-- [TP-H006] Event handler with template expression -->
+<button onclick="doSomething('{{ userInput }}')">Click</button>
+
+<!-- ======================================================================= -->
+<!-- SECTION 2: TEMPLATE INJECTION – FALSE POSITIVES (safe escaping)         -->
+<!-- ======================================================================= -->
+
+<!-- [FP-H001] Handlebars double-brace is auto-escaped -->
+<div class="safe-bio">
+    {{ userBio }}
+</div>
+
+<!-- [FP-H002] EJS escaped output with = -->
+<div class="safe-comment">
+    <%= comment %>
+</div>
+
+<!-- [FP-H003] Static Handlebars – no user variable concern -->
+<div class="footer">
+    {{ appVersion }}
+</div>
+
+<!-- [FP-H004] Angular interpolation in text context (auto-escaped) -->
+<span class="greeting">Hello, {{ userName }}!</span>
+
+<!-- [FP-H005] Vue.js {{ }} in text (auto-escaped by default) -->
+<p>{{ message }}</p>
+
+<!-- [FP-H006] React JSX text interpolation (auto-escaped) -->
+<!-- <p>{user.name}</p> - React escapes by default -->
+
+<!-- ======================================================================= -->
+<!-- SECTION 3: INLINE SCRIPT – TRUE POSITIVES (DOM XSS)                    -->
+<!-- ======================================================================= -->
+
+<!-- [TP-H007] location.hash to innerHTML -->
+<script>
+    var input = location.hash.slice(1);
+    document.getElementById('output').innerHTML = input;
+</script>
+
+<!-- [TP-H008] location.search to document.write -->
+<script>
+    var q = location.search;
+    document.write('<p>Search: ' + q + '</p>');
+</script>
+
+<!-- [TP-H009] document.referrer to innerHTML -->
+<script>
+    var ref = document.referrer;
+    document.body.innerHTML = '<p>From: ' + ref + '</p>';
+</script>
+
+<!-- [TP-H010] document.URL to eval -->
+<script>
+    var url = document.URL;
+    var param = url.split('action=')[1];
+    eval(param);
+</script>
+
+<!-- [TP-H011] window.name to innerHTML -->
+<script>
+    var payload = window.name;
+    document.querySelector('#widget').innerHTML = payload;
+</script>
+
+<!-- [TP-H012] document.cookie to document.write -->
+<script>
+    var cookie = document.cookie;
+    document.write('<input value="' + cookie + '">');
+</script>
+
+<!-- [TP-H013] postMessage to innerHTML -->
+<script>
+    window.addEventListener('message', function(event) {
+        document.getElementById('msg').innerHTML = event.data;
+    });
+</script>
+
+<!-- [TP-H014] URLSearchParams.get to innerHTML -->
+<script>
+    var params = new URLSearchParams(location.search);
+    var name = params.get('name');
+    document.getElementById('greeting').innerHTML = '<h1>Hello ' + name + '</h1>';
+</script>
+
+<!-- ======================================================================= -->
+<!-- SECTION 4: INLINE SCRIPT – FALSE POSITIVES (safe patterns)              -->
+<!-- ======================================================================= -->
+
+<!-- [FP-H007] textContent is safe -->
+<script>
+    var input = location.hash.slice(1);
+    document.getElementById('output').textContent = input;
+</script>
+
+<!-- [FP-H008] innerText is safe -->
+<script>
+    var q = location.search;
+    document.getElementById('search').innerText = q;
+</script>
+
+<!-- [FP-H009] DOMPurify.sanitize before innerHTML -->
+<script>
+    var dirty = location.hash.slice(1);
+    var clean = DOMPurify.sanitize(dirty);
+    document.body.innerHTML = clean;
+</script>
+
+<!-- [FP-H010] encodeURIComponent before write -->
+<script>
+    var input = location.search;
+    var safe = encodeURIComponent(input);
+    document.write('<p>' + safe + '</p>');
+</script>
+
+<!-- [FP-H011] createElement + textContent -->
+<script>
+    var data = location.hash;
+    var el = document.createElement('span');
+    el.textContent = data;
+    document.body.appendChild(el);
+</script>
+
+<!-- [FP-H012] Static string to innerHTML -->
+<script>
+    document.body.innerHTML = '<h1>Welcome to the site</h1>';
+</script>
+
+<!-- [FP-H013] JSON.stringify output – encoded -->
+<script>
+    var data = location.hash;
+    document.body.innerHTML = '<pre>' + JSON.stringify(data) + '</pre>';
+</script>
+
+<!-- [FP-H014] parseInt before innerHTML (numeric only) -->
+<script>
+    var raw = location.hash.slice(1);
+    var num = parseInt(raw, 10);
+    if (!isNaN(num)) {
+        document.body.innerHTML = '<p>Count: ' + num + '</p>';
+    }
+</script>
+
+<!-- ======================================================================= -->
+<!-- SECTION 5: PROTOTYPE POLLUTION IN HTML – TRUE POSITIVES                 -->
+<!-- ======================================================================= -->
+
+<!-- [TP-H015] __proto__ bracket access -->
+<script>
+    var userObj = JSON.parse(userInput);
+    var target = {};
+    target[userObj.key] = userObj.value;
+    // If key is __proto__, this pollutes
+</script>
+
+<!-- [TP-H016] Direct __proto__ assignment -->
+<script>
+    function merge(dst, src) {
+        for (var key in src) {
+            dst[key] = src[key]; // No hasOwnProperty check
+        }
+    }
+</script>
+
+<!-- [TP-H017] _.merge with user data -->
+<script>
+    var payload = JSON.parse(location.hash.slice(1));
+    _.merge({}, payload);
+</script>
+
+<!-- [TP-H018] $.extend deep merge -->
+<script>
+    var data = JSON.parse(userInput);
+    $.extend(true, {}, data);
+</script>
+
+<!-- [TP-H019] constructor.prototype access -->
+<script>
+    var obj = {};
+    obj['constructor']['prototype'].isAdmin = true;
+</script>
+
+<!-- [TP-H020] Object.assign to __proto__ -->
+<script>
+    var input = JSON.parse(data);
+    Object.assign(input.__proto__, { admin: true });
+</script>
+
+<!-- ======================================================================= -->
+<!-- SECTION 6: PROTOTYPE POLLUTION IN HTML – FALSE POSITIVES                -->
+<!-- ======================================================================= -->
+
+<!-- [FP-H015] for-in with hasOwnProperty guard -->
+<script>
+    function safeMerge(target, source) {
+        for (var key in source) {
+            if (source.hasOwnProperty(key)) {
+                target[key] = source[key];
+            }
+        }
+    }
+</script>
+
+<!-- [FP-H016] Object.keys iteration -->
+<script>
+    function safeAssign(target, source) {
+        Object.keys(source).forEach(function(key) {
+            target[key] = source[key];
+        });
+    }
+</script>
+
+<!-- [FP-H017] for-in with __proto__ check -->
+<script>
+    function filteredMerge(target, source) {
+        for (var key in source) {
+            if (key === '__proto__') continue;
+            if (key === 'constructor') continue;
+            target[key] = source[key];
+        }
+    }
+</script>
+
+<!-- [FP-H018] Object.create(null) prototype -->
+<script>
+    var safeObj = Object.create(null);
+    safeObj.name = 'test';
+</script>
+
+<!-- [FP-H019] Static object spread – no user input -->
+<script>
+    var defaults = { color: 'blue' };
+    var config = { ...defaults, size: 10 };
+</script>
+
+<!-- ======================================================================= -->
+<!-- SECTION 7: INLINE SCRIPT – FALSE NEGATIVES (tricky DOM XSS)            -->
+<!-- ======================================================================= -->
+
+<!-- [FN-H001] Taint through variable chain to innerHTML -->
+<script>
+    var raw = location.hash.slice(1);
+    var step1 = decodeURIComponent(raw);
+    var step2 = step1.trim();
+    var step3 = '<div>' + step2 + '</div>';
+    document.body.innerHTML = step3;
+</script>
+
+<!-- [FN-H002] Taint through template literal to innerHTML -->
+<script>
+    var q = new URLSearchParams(location.search).get('q');
+    var html = `<span class="result">${q}</span>`;
+    document.getElementById('results').innerHTML = html;
+</script>
+
+<!-- [FN-H003] Taint through .replace() still tainted -->
+<script>
+    var input = location.hash.slice(1);
+    var sanitized = input.replace(/</g, '');  // Incomplete sanitization
+    document.body.innerHTML = sanitized;
+</script>
+
+<!-- [FN-H004] Taint through ternary expression -->
+<script>
+    var val = location.search ? location.search.substring(1) : '';
+    document.body.innerHTML = val;
+</script>
+
+<!-- [FN-H005] Taint through .split() and index access -->
+<script>
+    var parts = location.hash.split('#');
+    var fragment = parts[1];
+    document.getElementById('content').innerHTML = fragment;
+</script>
+
+<!-- [FN-H006] Taint through .concat() -->
+<script>
+    var prefix = '<div>';
+    var content = prefix.concat(location.search, '</div>');
+    document.body.innerHTML = content;
+</script>
+
+<!-- [FN-H007] Taint through += augmented assignment -->
+<script>
+    var html = '';
+    html += '<div>';
+    html += location.hash;
+    html += '</div>';
+    document.body.innerHTML = html;
+</script>
+
+<!-- [FN-H008] jQuery .html() with location source -->
+<script>
+    var data = location.hash.slice(1);
+    $('#output').html(data);
+</script>
+
+<!-- [FN-H009] insertAdjacentHTML with tainted data -->
+<script>
+    var payload = document.referrer;
+    document.body.insertAdjacentHTML('beforeend', payload);
+</script>
+
+<!-- [FN-H010] outerHTML assignment with tainted data -->
+<script>
+    var content = location.search.substring(1);
+    document.getElementById('target').outerHTML = content;
+</script>
+
+<!-- [FN-H011] eval with location data through variable -->
+<script>
+    var code = location.hash.slice(1);
+    var decoded = decodeURIComponent(code);
+    eval(decoded);
+</script>
+
+<!-- [FN-H012] setTimeout with string argument from location -->
+<script>
+    var action = location.hash.slice(1);
+    setTimeout(action, 100);
+</script>
+
+<!-- [FN-H013] new Function with location data -->
+<script>
+    var body = location.search.substring(1);
+    var fn = new Function(body);
+    fn();
+</script>
+
+<!-- [FN-H014] window.open with user URL -->
+<script>
+    var url = new URLSearchParams(location.search).get('goto');
+    window.open(url);
+</script>
+
+<!-- [FN-H015] location.assign with user URL -->
+<script>
+    var next = location.hash.slice(1);
+    location.assign(next);
+</script>
+
+<!-- [FN-H016] sessionStorage to innerHTML (2nd order) -->
+<script>
+    var saved = sessionStorage.getItem('userHTML');
+    document.body.innerHTML = saved;
+</script>
+
+<!-- [FN-H017] localStorage to eval (2nd order) -->
+<script>
+    var code = localStorage.getItem('cachedScript');
+    eval(code);
+</script>
+
+<!-- [FN-H018] document.cookie to innerHTML -->
+<script>
+    var cookies = document.cookie;
+    document.getElementById('debug').innerHTML = '<pre>' + cookies + '</pre>';
+</script>
+
+<!-- [FN-H019] Taint through array .join() -->
+<script>
+    var segments = [location.hash, '<br>', location.search];
+    var combined = segments.join('');
+    document.body.innerHTML = combined;
+</script>
+
+<!-- [FN-H020] Taint through .toLowerCase() -->
+<script>
+    var raw = location.hash.slice(1);
+    var lower = raw.toLowerCase();
+    document.body.innerHTML = lower;
+</script>
+
+<!-- ======================================================================= -->
+<!-- SECTION 8: HTML ATTRIBUTE INJECTION – TRUE POSITIVES                    -->
+<!-- ======================================================================= -->
+
+<!-- [TP-H021] Unescaped template in onclick handler -->
+<button onclick="navigate('{{{ destination }}}')">Go</button>
+
+<!-- [TP-H022] Unescaped template in href -->
+<a href="{{{ linkUrl }}}">Visit</a>
+
+<!-- [TP-H023] Unescaped template in img src -->
+<img src="<%- imageUrl %>" alt="photo">
+
+<!-- [TP-H024] javascript: in href with template -->
+<a href="javascript:void(<%- userCode %>)">Run</a>
+
+<!-- [TP-H025] EJS unescaped in style attribute -->
+<div style="background: url(<%- bgUrl %>)">Content</div>
+
+<!-- ======================================================================= -->
+<!-- SECTION 9: HTML ATTRIBUTE INJECTION – FALSE POSITIVES                   -->
+<!-- ======================================================================= -->
+
+<!-- [FP-H020] Safe escaped template in text only -->
+<p><%= userName %></p>
+
+<!-- [FP-H021] Handlebars escaped in text -->
+<span>{{ displayName }}</span>
+
+<!-- [FP-H022] Static href – no injection -->
+<a href="/about">About Us</a>
+
+<!-- [FP-H023] Static onclick – no template -->
+<button onclick="submitForm()">Submit</button>
+
+<!-- [FP-H024] Safe data-* attribute with escaped template -->
+<div data-id="<%= itemId %>">Item</div>
+
+<!-- [FP-H025] Static image src -->
+<img src="/images/logo.png" alt="Logo">
+
+<!-- [FP-H026] Numeric template in safe context -->
+<span>Total: <%= count %></span>
+
+<!-- ======================================================================= -->
+<!-- SECTION 10: EXPRESS XSS IN INLINE SCRIPTS – TRUE POSITIVES              -->
+<!-- ======================================================================= -->
+
+<!-- [TP-H026] res.send with HTML and template -->
+<script>
+    // Server-side Express pattern
+    // res.send('<div>' + req.query.name + '</div>');
+    // Simulated: Express taint via inline
+    var userParam = "<%= req.query.name %>";
+    document.write('<p>' + userParam + '</p>');
+</script>
+
+<!-- [TP-H027] Inline script with unescaped server data -->
+<script>
+    var serverData = <%- JSON.stringify(userData) %>;
+    document.body.innerHTML = serverData.bio;
+</script>
+
+<!-- [TP-H028] Inline config object with unescaped user data -->
+<script>
+    var config = {
+        username: "<%- username %>",
+        role: "<%- role %>"
+    };
+</script>
+
+<!-- ======================================================================= -->
+<!-- SECTION 11: MIXED EDGE CASES                                            -->
+<!-- ======================================================================= -->
+
+<!-- [FP-H027] Comment containing sink pattern – should be ignored -->
+<script>
+    // document.body.innerHTML = location.hash; // This is a comment
+    /* document.write(document.cookie); */
+    console.log("safe");
+</script>
+
+<!-- [FP-H028] String literal containing sink pattern -->
+<script>
+    var example = "document.body.innerHTML = location.hash";
+    console.log(example);
+</script>
+
+<!-- [FN-H021] Dangerous wrapper function call -->
+<script>
+    function renderContent(html) {
+        document.body.innerHTML = html;
+    }
+    var userContent = location.hash.slice(1);
+    renderContent(userContent);
+</script>
+
+<!-- [FN-H022] Event listener with tainted data to sink -->
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        var param = new URLSearchParams(location.search).get('msg');
+        document.getElementById('notification').innerHTML = param;
+    });
+</script>
+
+<!-- [FN-H023] fetch response to innerHTML -->
+<script>
+    fetch('/api/profile')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            document.getElementById('bio').innerHTML = data.bio;
+        });
+</script>
+
+<!-- [FN-H024] Dynamic property access to sink -->
+<script>
+    var sinkName = 'innerHTML';
+    var data = location.hash.slice(1);
+    document.body[sinkName] = data;
+</script>
+
+<!-- [FN-H025] Array-based sink construction -->
+<script>
+    var parts = ['inner', 'HTML'];
+    var prop = parts.join('');
+    document.body[prop] = location.hash;
+</script>
+
+<!-- ======================================================================= -->
+<!-- SECTION 12: FRAMEWORK-SPECIFIC PATTERNS                                 -->
+<!-- ======================================================================= -->
+
+<!-- [TP-H029] React dangerouslySetInnerHTML pattern -->
+<script>
+    // In JSX: <div dangerouslySetInnerHTML={{__html: userInput}} />
+    var dangerouslySetInnerHTML = { __html: location.hash };
+</script>
+
+<!-- [TP-H030] Vue v-html directive -->
+<div v-html="userContent"></div>
+
+<!-- [TP-H031] Angular innerHTML binding -->
+<div [innerHTML]="userData.bio"></div>
+
+<!-- [FP-H029] React with sanitized content -->
+<script>
+    // <div dangerouslySetInnerHTML={{__html: DOMPurify.sanitize(input)}} />
+    var safe = DOMPurify.sanitize(userInput);
+</script>
+
+<!-- ======================================================================= -->
+<!-- SECTION 13: COMPLEX TAINT FLOWS IN HTML                                 -->
+<!-- ======================================================================= -->
+
+<!-- [FN-H026] Multi-step taint through DOM API chain -->
+<script>
+    var params = new URLSearchParams(window.location.search);
+    var name = params.get('name');
+    var el = document.createElement('div');
+    el.innerHTML = '<strong>' + name + '</strong>';
+    document.body.appendChild(el);
+</script>
+
+<!-- [FN-H027] Taint through .map().join() -->
+<script>
+    var items = location.hash.slice(1).split(',');
+    var html = items.map(function(item) {
+        return '<li>' + item + '</li>';
+    }).join('');
+    document.getElementById('list').innerHTML = '<ul>' + html + '</ul>';
+</script>
+
+<!-- [FN-H028] Taint through callback with closure -->
+<script>
+    var dirty = location.search;
+    setTimeout(function() {
+        document.body.innerHTML = dirty;
+    }, 0);
+</script>
+
+<!-- [FN-H029] Taint through Promise constructor -->
+<script>
+    new Promise(function(resolve) {
+        resolve(location.hash.slice(1));
+    }).then(function(data) {
+        document.body.innerHTML = data;
+    });
+</script>
+
+<!-- [FN-H030] Taint through JSON round-trip -->
+<script>
+    var input = location.hash.slice(1);
+    var obj = JSON.parse('{"html": "' + input + '"}');
+    document.body.innerHTML = obj.html;
+</script>
+
+<!-- ======================================================================= -->
+<!-- SECTION 14: OPEN REDIRECT IN HTML                                       -->
+<!-- ======================================================================= -->
+
+<!-- [TP-H032] Meta refresh with unescaped URL -->
+<meta http-equiv="refresh" content="0;url=<%- redirectUrl %>">
+
+<!-- [TP-H033] javascript: in anchor with user data -->
+<a href="javascript:location='<%- target %>'">Redirect</a>
+
+<!-- [FP-H030] Meta refresh with static URL -->
+<meta http-equiv="refresh" content="5;url=/login">
+
+<!-- [FP-H031] Safe anchor with static href -->
+<a href="/dashboard">Go to Dashboard</a>
+
+<!-- ======================================================================= -->
+<!-- SECTION 15: SCRIPT SRC / IFRAME SRC INJECTION                           -->
+<!-- ======================================================================= -->
+
+<!-- [TP-H034] Script src with unescaped template -->
+<script src="<%- scriptUrl %>"></script>
+
+<!-- [TP-H035] Iframe src with unescaped template -->
+<iframe src="{{{ iframeSrc }}}"></iframe>
+
+<!-- [FP-H032] Script src with static path -->
+<script src="/js/app.min.js"></script>
+
+<!-- [FP-H033] Iframe src with static path -->
+<iframe src="/embed/map.html"></iframe>
+
+<!-- ======================================================================= -->
+<!-- SECTION 16: STYLE INJECTION                                             -->
+<!-- ======================================================================= -->
+
+<!-- [TP-H036] Style with unescaped template -->
+<style>
+    body { background: url(<%- bgImage %>); }
+</style>
+
+<!-- [FP-H034] Style with escaped template -->
+<style>
+    body { background-color: <%= themeColor %>; }
+</style>
+
+<!-- [FP-H035] Static stylesheet link -->
+<link rel="stylesheet" href="/css/main.css">
+
+<!-- ======================================================================= -->
+<!-- SECTION 17: SVG / MATH INJECTION                                        -->
+<!-- ======================================================================= -->
+
+<!-- [TP-H037] SVG with unescaped user content -->
+<svg>
+    <text><%- svgText %></text>
+</svg>
+
+<!-- [TP-H038] SVG onload handler with template -->
+<svg onload="<%- onloadCode %>">
+</svg>
+
+<!-- [FP-H036] Static SVG content -->
+<svg width="100" height="100">
+    <circle cx="50" cy="50" r="40" fill="blue" />
+</svg>
+
+</body>
+</html>
