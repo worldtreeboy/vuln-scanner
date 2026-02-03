@@ -11,7 +11,6 @@ Detection Categories:
 - Code Injection (ScriptEngine, SpEL, OGNL, MVEL, Class.forName)
 - JNDI Injection (InitialContext.lookup)
 - Insecure Deserialization (ObjectInputStream, XMLDecoder, SnakeYAML, XStream)
-- SSRF (URL, HttpClient, RestTemplate, WebClient)
 - XXE (DocumentBuilderFactory, SAXParser, XMLInputFactory)
 - XPath Injection (XPath.evaluate/compile with tainted concat)
 - Reflection Injection (Class.forName, getMethod with tainted input)
@@ -79,7 +78,6 @@ class VulnCategory(Enum):
     COMMAND_INJECTION = "Command Injection"
     DESERIALIZATION = "Insecure Deserialization"
     SSTI = "Server-Side Template Injection"
-    SSRF = "Server-Side Request Forgery"
     XPATH_INJECTION = "XPath Injection"
     XXE = "XML External Entity"
 
@@ -612,7 +610,6 @@ class JavaASTAnalyzer:
             self._check_sql_injection(method, tracker)
             self._check_command_injection(method, tracker)
             self._check_deserialization(method, tracker)
-            self._check_ssrf(method, tracker)
             self._check_xxe(method, tracker)
             self._check_jndi_injection(method, tracker)
             self._check_script_engine(method, tracker)
@@ -954,106 +951,6 @@ class JavaASTAnalyzer:
 
     # ========================================================================
     # SSRF Detection
-    # ========================================================================
-
-    def _check_ssrf(self, method: Node, tracker: TaintTracker):
-        """Detect SSRF via URL/HttpClient/RestTemplate with tainted URLs."""
-        body = get_child_by_type(method, "block")
-        if not body:
-            return
-
-        method_invocations = find_nodes(body, "method_invocation")
-        object_creations = find_nodes(body, "object_creation_expression")
-
-        # new URL(tainted)
-        for oc in object_creations:
-            oc_text = node_text(oc)
-            line = get_node_line(oc)
-            if re.search(r'new\s+URL\s*\(', oc_text):
-                args = get_child_by_type(oc, "argument_list")
-                if args and tracker.is_tainted(node_text(args)):
-                    self._add_finding(
-                        line, 0,
-                        "SSRF - URL constructed with tainted data",
-                        VulnCategory.SSRF, Severity.HIGH, "HIGH",
-                        tracker.get_taint_chain(node_text(args)),
-                        "User-controlled data used to construct URL object."
-                    )
-            # new HttpGet(tainted), new HttpPost(tainted)
-            if re.search(r'new\s+Http(?:Get|Post|Put|Delete|Patch)\s*\(', oc_text):
-                args = get_child_by_type(oc, "argument_list")
-                if args and tracker.is_tainted(node_text(args)):
-                    self._add_finding(
-                        line, 0,
-                        "SSRF - Apache HttpClient with tainted URL",
-                        VulnCategory.SSRF, Severity.HIGH, "HIGH",
-                        tracker.get_taint_chain(node_text(args)),
-                        "User-controlled URL in Apache HttpClient request."
-                    )
-
-        for mi in method_invocations:
-            mi_text = node_text(mi)
-            line = get_node_line(mi)
-            called = self._get_called_method_name(mi)
-
-            # url.openConnection() where url is tainted
-            if called in ("openConnection", "openStream"):
-                receiver = self._get_receiver(mi)
-                if receiver and tracker.is_tainted(node_text(receiver)):
-                    self._add_finding(
-                        line, 0,
-                        "SSRF - HTTP connection with tainted URL",
-                        VulnCategory.SSRF, Severity.HIGH, "HIGH",
-                        description="HTTP connection opened with user-controlled URL."
-                    )
-
-            # RestTemplate: getForObject(tainted, ...), postForObject(tainted, ...)
-            if called in ("getForObject", "getForEntity", "postForObject", "postForEntity",
-                         "exchange", "execute"):
-                # Verify receiver is actually a RestTemplate, not JdbcTemplate/Statement/etc.
-                receiver = self._get_receiver(mi)
-                recv_text = node_text(receiver).strip() if receiver else ""
-                # Skip if receiver is clearly a DB/SQL object
-                if re.search(r'(?i)jdbc|db|dao|stmt|statement|conn|connection|entityManager|em\b|template(?!.*[Rr]est)', recv_text):
-                    continue
-                # For "execute" specifically, require RestTemplate-like receiver
-                if called == "execute" and not re.search(r'(?i)rest|restTemplate|http|client', recv_text):
-                    continue
-                args = get_child_by_type(mi, "argument_list")
-                if args:
-                    first = self._get_first_arg(args)
-                    if first and tracker.is_tainted(node_text(first)):
-                        self._add_finding(
-                            line, 0,
-                            "SSRF - RestTemplate with tainted URL",
-                            VulnCategory.SSRF, Severity.HIGH, "HIGH",
-                            description="User-controlled URL in RestTemplate request."
-                        )
-
-            # WebClient: .uri(tainted)
-            if called == "uri":
-                args = get_child_by_type(mi, "argument_list")
-                if args and tracker.is_tainted(node_text(args)):
-                    self._add_finding(
-                        line, 0,
-                        "SSRF - WebClient with tainted URI",
-                        VulnCategory.SSRF, Severity.HIGH, "HIGH",
-                        description="User-controlled URI in WebClient request."
-                    )
-
-            # OkHttp: .url(tainted)
-            if called == "url" and ".Builder" in mi_text:
-                args = get_child_by_type(mi, "argument_list")
-                if args and tracker.is_tainted(node_text(args)):
-                    self._add_finding(
-                        line, 0,
-                        "SSRF - OkHttp with tainted URL",
-                        VulnCategory.SSRF, Severity.HIGH, "HIGH",
-                        description="User-controlled URL in OkHttp request."
-                    )
-
-    # ========================================================================
-    # XXE Detection
     # ========================================================================
 
     def _check_xxe(self, method: Node, tracker: TaintTracker):
@@ -1737,7 +1634,6 @@ def _build_stats_sidebar(findings: List[Finding], file_count: int, elapsed: floa
         cat_counts[f.category.value] += 1
     cat_abbrev = {
         "Server-Side Template Injection": "SSTI",
-        "Server-Side Request Forgery": "SSRF",
         "Insecure Deserialization": "Deserialization",
         "XML External Entity": "XXE",
         "Command Injection": "Cmd Injection",

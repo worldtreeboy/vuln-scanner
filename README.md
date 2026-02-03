@@ -103,14 +103,10 @@ Tracked sources include `repo.findById()`, `cursor.fetchone()`, `Model.findOne()
 | Code Injection (eval, SpEL, OGNL, pandas) | Yes | Yes | All 7 |
 | XPath/XQuery Injection | Yes | Yes | All 7 |
 | XXE & XSLT | Yes | - | All 7 |
-| SSRF | Yes | - | All 7 |
 | SSTI | Yes | - | All 7 |
 | Insecure Deserialization | Yes | Double-unserialize | All 7 |
 | Expression Language (SpEL, OGNL, MVEL, EL) | Yes | - | Java |
 | Reflection Injection | Yes | - | Java |
-
-| LFI/RFI | Yes | - | PHP |
-| Path Traversal | Yes | - | PHP |
 
 **Not detected:** XSS (use js-treesitter.py for JS), Weak Crypto, Session Fixation, Prototype Pollution (use js-treesitter.py for JS).
 
@@ -161,7 +157,7 @@ python3 vulnhunter.py target/ [options]
 
 ### java-treesitter.py - Java AST Scanner
 
-Deep Java analysis using [tree-sitter](https://tree-sitter.github.io/) with **per-method taint scoping**. Covers 13 vulnerability categories including JNDI injection, mass assignment, and reflection injection. Framework-agnostic (Spring, Struts2, Servlets, plain Java).
+Deep Java analysis using [tree-sitter](https://tree-sitter.github.io/) with **per-method taint scoping**. Covers 12 vulnerability categories including JNDI injection, mass assignment, and reflection injection. Framework-agnostic (Spring, Struts2, Servlets, plain Java).
 
 ```bash
 pip3 install tree-sitter tree-sitter-java
@@ -174,7 +170,7 @@ python3 java-treesitter.py target/ [options]
 
 ### js-treesitter.py - JavaScript AST Scanner
 
-Deep JavaScript analysis using [tree-sitter](https://tree-sitter.github.io/) with **file-level taint tracking**. Covers 7 vulnerability categories: DOM XSS, Reflected XSS, Prototype Pollution, Dangerous Eval, Open Redirect, Path Traversal, Command Injection. Supports ES6+, Express.js, jQuery, and HTML inline scripts.
+Deep JavaScript analysis using [tree-sitter](https://tree-sitter.github.io/) with **file-level taint tracking**. Covers 6 vulnerability categories: DOM XSS, Reflected XSS, Prototype Pollution, Dangerous Eval, Open Redirect, Command Injection. Supports ES6+, Express.js, jQuery, and HTML inline scripts.
 
 ```bash
 pip3 install tree-sitter tree-sitter-javascript
@@ -187,7 +183,7 @@ python3 js-treesitter.py target/ [options]
 
 ### php-treesitter.py - PHP AST Scanner
 
-Deep PHP analysis using [tree-sitter](https://tree-sitter.github.io/) with **per-function taint tracking** and sanitizer awareness. Covers 12 vulnerability categories across all major PHP sinks. Taint sources: `$_GET`, `$_POST`, `$_REQUEST`, `$_COOKIE`, `$_SERVER`, `$_FILES`, `$_ENV`, `file_get_contents("php://input")`, `getenv()`, and public function parameters.
+Deep PHP analysis using [tree-sitter](https://tree-sitter.github.io/) with **per-function taint tracking** and sanitizer awareness. Covers 9 vulnerability categories across all major PHP sinks. Taint sources: `$_GET`, `$_POST`, `$_REQUEST`, `$_COOKIE`, `$_SERVER`, `$_FILES`, `$_ENV`, `file_get_contents("php://input")`, `getenv()`, and public function parameters.
 
 ```bash
 pip3 install tree-sitter tree-sitter-php
@@ -206,11 +202,8 @@ python3 php-treesitter.py target/ [options]
 | Command Injection | `exec`, `system`, `passthru`, `shell_exec`, `popen`, `proc_open`, `pcntl_exec`, backtick | CRITICAL |
 | Code Injection | `eval`, `assert`, `create_function`, `preg_replace /e` | CRITICAL |
 | Insecure Deserialization | `unserialize` (with `allowed_classes` mitigation detection) | CRITICAL |
-| LFI/RFI | `include`, `require`, `include_once`, `require_once` | CRITICAL |
-| SSRF | `file_get_contents`, `curl_setopt(CURLOPT_URL)`, `curl_init`, `fopen`, `SoapClient` | HIGH |
 | XXE | `DOMDocument->loadXML/loadHTML`, `simplexml_load_string`, `XMLReader` | HIGH |
 | XPath Injection | `DOMXPath->query/evaluate` | HIGH |
-| Path Traversal | `file_get_contents`, `file_put_contents`, `fopen`, `readfile`, `unlink`, `copy`, `rename`, `mkdir`, `rmdir` | HIGH |
 | SSTI | Twig `->render`/`->createTemplate`, Smarty `->fetch("string:")` | HIGH |
 | NoSQL Injection | MongoDB `->find`, `->findOne`, `->aggregate`, `->deleteMany`, `->updateMany` | CRITICAL |
 | Second-order SQLi | DB-fetched data (`->fetch()`, `mysqli_fetch_*`) in raw SQL concat | HIGH |

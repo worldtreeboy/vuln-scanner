@@ -10,11 +10,8 @@ Detection Categories:
 - Command Injection (exec, system, passthru, shell_exec, popen, proc_open, backtick)
 - Code Injection (eval, assert, create_function, preg_replace /e)
 - Insecure Deserialization (unserialize with tainted input)
-- LFI/RFI (include/require with tainted path)
-- SSRF (file_get_contents, curl_setopt CURLOPT_URL, fopen, SoapClient)
 - XXE (DOMDocument->loadXML, simplexml_load_string, XMLReader)
 - XPath Injection (DOMXPath->query/evaluate with tainted concat)
-- Path Traversal (file_get_contents, file_put_contents, fopen, readfile, unlink)
 - SSTI (Twig render/createTemplate, Blade, Smarty with tainted template)
 - NoSQL Injection (MongoDB find/aggregate with tainted query)
 - Second-order SQLi (DB-fetched data in raw SQL concat)
@@ -81,11 +78,8 @@ class VulnCategory(Enum):
     COMMAND_INJECTION = "Command Injection"
     DESERIALIZATION = "Insecure Deserialization"
     SSTI = "Server-Side Template Injection"
-    SSRF = "Server-Side Request Forgery"
     XPATH_INJECTION = "XPath Injection"
     XXE = "XML External Entity"
-    LFI_RFI = "Local/Remote File Inclusion"
-    PATH_TRAVERSAL = "Path Traversal"
 
 
 @dataclass
@@ -703,11 +697,8 @@ class PHPASTAnalyzer:
         self._check_command_injection(scope, tracker)
         self._check_code_injection(scope, tracker)
         self._check_deserialization(scope, tracker)
-        self._check_lfi_rfi(scope, tracker)
-        self._check_ssrf(scope, tracker)
         self._check_xxe(scope, tracker)
         self._check_xpath_injection(scope, tracker)
-        self._check_path_traversal(scope, tracker)
         self._check_ssti(scope, tracker)
         self._check_nosql_injection(scope, tracker)
         self._check_second_order_sqli(scope, tracker)
@@ -1051,166 +1042,6 @@ class PHPASTAnalyzer:
     # LFI/RFI Detection
     # ========================================================================
 
-    def _check_lfi_rfi(self, func: Node, tracker: TaintTracker):
-        """Detect Local/Remote File Inclusion via include/require with tainted path."""
-        body = self._get_body(func)
-        if not body:
-            return
-
-        include_types = {
-            "include_expression", "include_once_expression",
-            "require_expression", "require_once_expression",
-        }
-
-        include_nodes = find_nodes_multi(body, include_types)
-        for inc in include_nodes:
-            line = get_node_line(inc)
-            inc_text = node_text(inc)
-
-            # The path is the child after the keyword
-            # Structure: include_expression -> "include" path_expression
-            path_node = None
-            for child in inc.children:
-                if child.type not in ("include", "include_once", "require", "require_once"):
-                    path_node = child
-                    break
-
-            if not path_node:
-                continue
-
-            path_text = node_text(path_node)
-            keyword = inc.type.replace("_expression", "").replace("_", "_")
-
-            if tracker.is_tainted(path_text):
-                self._add_finding(
-                    line, 0,
-                    f"LFI/RFI - {keyword} with tainted path",
-                    VulnCategory.LFI_RFI, Severity.CRITICAL, "HIGH",
-                    tracker.get_taint_chain(path_text),
-                    f"User-controlled path in {keyword} allows local/remote file inclusion."
-                )
-            elif self._has_tainted_concat(path_node, tracker):
-                self._add_finding(
-                    line, 0,
-                    f"LFI/RFI - {keyword} with tainted concatenation",
-                    VulnCategory.LFI_RFI, Severity.CRITICAL, "HIGH",
-                    tracker.get_taint_chain(path_text),
-                    f"Tainted data concatenated into {keyword} path."
-                )
-
-    # ========================================================================
-    # SSRF Detection
-    # ========================================================================
-
-    def _check_ssrf(self, func: Node, tracker: TaintTracker):
-        """Detect SSRF via file_get_contents, curl, fopen, SoapClient with tainted URLs."""
-        body = self._get_body(func)
-        if not body:
-            return
-
-        func_calls = find_nodes(body, "function_call_expression")
-        for call in func_calls:
-            name_node = get_child_by_type(call, "name")
-            if not name_node:
-                continue
-            func_name = node_text(name_node)
-            line = get_node_line(call)
-
-            # file_get_contents(tainted_url) — but not php://input
-            if func_name == "file_get_contents":
-                args = get_child_by_type(call, "arguments")
-                if not args:
-                    continue
-                first_arg = self._get_first_arg(args)
-                if not first_arg:
-                    continue
-                arg_text = node_text(first_arg)
-                if "php://input" in arg_text:
-                    continue  # This is a taint source, not SSRF
-                if tracker.is_tainted(arg_text):
-                    self._add_finding(
-                        line, 0,
-                        "SSRF - file_get_contents() with tainted URL",
-                        VulnCategory.SSRF, Severity.HIGH, "HIGH",
-                        tracker.get_taint_chain(arg_text),
-                        "User-controlled URL in file_get_contents()."
-                    )
-
-            # fopen(tainted_url, ...)
-            if func_name == "fopen":
-                args = get_child_by_type(call, "arguments")
-                if not args:
-                    continue
-                first_arg = self._get_first_arg(args)
-                if not first_arg:
-                    continue
-                arg_text = node_text(first_arg)
-                if tracker.is_tainted(arg_text):
-                    self._add_finding(
-                        line, 0,
-                        "SSRF - fopen() with tainted URL",
-                        VulnCategory.SSRF, Severity.HIGH, "HIGH",
-                        tracker.get_taint_chain(arg_text),
-                        "User-controlled URL/path in fopen()."
-                    )
-
-            # curl_setopt($ch, CURLOPT_URL, tainted)
-            if func_name == "curl_setopt":
-                args = get_child_by_type(call, "arguments")
-                if not args:
-                    continue
-                all_args = self._get_all_args(args)
-                if len(all_args) >= 3:
-                    opt_text = node_text(all_args[1])
-                    val_text = node_text(all_args[2])
-                    if "CURLOPT_URL" in opt_text and tracker.is_tainted(val_text):
-                        self._add_finding(
-                            line, 0,
-                            "SSRF - curl_setopt CURLOPT_URL with tainted data",
-                            VulnCategory.SSRF, Severity.HIGH, "HIGH",
-                            tracker.get_taint_chain(val_text),
-                            "User-controlled URL in curl_setopt(CURLOPT_URL)."
-                        )
-
-            # curl_init(tainted_url)
-            if func_name == "curl_init":
-                args = get_child_by_type(call, "arguments")
-                if not args:
-                    continue
-                first_arg = self._get_first_arg(args)
-                if not first_arg:
-                    continue
-                arg_text = node_text(first_arg)
-                if tracker.is_tainted(arg_text):
-                    self._add_finding(
-                        line, 0,
-                        "SSRF - curl_init() with tainted URL",
-                        VulnCategory.SSRF, Severity.HIGH, "HIGH",
-                        tracker.get_taint_chain(arg_text),
-                        "User-controlled URL in curl_init()."
-                    )
-
-        # new SoapClient(tainted_wsdl)
-        object_creations = find_nodes(body, "object_creation_expression")
-        for oc in object_creations:
-            oc_text = node_text(oc)
-            line = get_node_line(oc)
-            if "SoapClient" in oc_text:
-                args = get_child_by_type(oc, "arguments")
-                if args:
-                    first_arg = self._get_first_arg(args)
-                    if first_arg and tracker.is_tainted(node_text(first_arg)):
-                        self._add_finding(
-                            line, 0,
-                            "SSRF - SoapClient with tainted WSDL URL",
-                            VulnCategory.SSRF, Severity.HIGH, "HIGH",
-                            description="User-controlled WSDL URL in SoapClient constructor."
-                        )
-
-    # ========================================================================
-    # XXE Detection
-    # ========================================================================
-
     def _check_xxe(self, func: Node, tracker: TaintTracker):
         """Detect XXE via DOMDocument->loadXML, simplexml_load_string, XMLReader."""
         body = self._get_body(func)
@@ -1343,55 +1174,6 @@ class PHPASTAnalyzer:
     # ========================================================================
     # Path Traversal Detection
     # ========================================================================
-
-    def _check_path_traversal(self, func: Node, tracker: TaintTracker):
-        """Detect path traversal via file ops with tainted path."""
-        body = self._get_body(func)
-        if not body:
-            return
-
-        path_funcs = {
-            "file_get_contents", "file_put_contents", "fopen",
-            "readfile", "unlink", "rename", "copy", "mkdir",
-            "rmdir", "file", "is_file", "is_dir", "realpath",
-        }
-
-        func_calls = find_nodes(body, "function_call_expression")
-        for call in func_calls:
-            name_node = get_child_by_type(call, "name")
-            if not name_node:
-                continue
-            func_name = node_text(name_node)
-
-            if func_name not in path_funcs:
-                continue
-
-            args = get_child_by_type(call, "arguments")
-            if not args:
-                continue
-            first_arg = self._get_first_arg(args)
-            if not first_arg:
-                continue
-            arg_text = node_text(first_arg)
-            line = get_node_line(call)
-
-            # Skip if arg is php://input (that's a taint source, not path traversal)
-            if "php://input" in arg_text:
-                continue
-
-            if tracker.is_tainted(arg_text) or self._has_tainted_concat(first_arg, tracker):
-                # Check for realpath/basename sanitization in surrounding code
-                body_text = node_text(body)
-                if self._has_path_sanitization(body_text, arg_text):
-                    continue
-
-                self._add_finding(
-                    line, 0,
-                    f"Path Traversal - {func_name}() with tainted path",
-                    VulnCategory.PATH_TRAVERSAL, Severity.HIGH, "HIGH",
-                    tracker.get_taint_chain(arg_text),
-                    f"User-controlled path in {func_name}() allows directory traversal."
-                )
 
     def _has_path_sanitization(self, body_text: str, arg_text: str) -> bool:
         """Check if there's path sanitization (realpath/basename) applied."""
@@ -2042,7 +1824,6 @@ def _build_stats_sidebar(findings: List[Finding], file_count: int, elapsed: floa
         cat_counts[f.category.value] += 1
     cat_abbrev = {
         "Server-Side Template Injection": "SSTI",
-        "Server-Side Request Forgery": "SSRF",
         "Insecure Deserialization": "Deserialization",
         "XML External Entity": "XXE",
         "Command Injection": "Cmd Injection",
@@ -2050,7 +1831,6 @@ def _build_stats_sidebar(findings: List[Finding], file_count: int, elapsed: floa
         "SQL Injection": "SQL Injection",
         "NoSQL Injection": "NoSQL Injection",
         "XPath Injection": "XPath Injection",
-        "Local/Remote File Inclusion": "LFI/RFI",
         "Path Traversal": "Path Traversal",
     }
     for cat, count in sorted(cat_counts.items(), key=lambda x: -x[1]):

@@ -86,11 +86,9 @@ class VulnCategory(Enum):
     COMMAND_INJECTION = "Command Injection"
     DESERIALIZATION = "Insecure Deserialization"
     SSTI = "Server-Side Template Injection"
-    SSRF = "Server-Side Request Forgery"
     AUTH_BYPASS = "Authentication Bypass"
     XPATH_INJECTION = "XPath Injection"
     XXE = "XML External Entity"
-    LFI_RFI = "Local/Remote File Inclusion"
     LDAP_INJECTION = "LDAP Injection"
     INFO_DISCLOSURE = "Information Disclosure"
 
@@ -2282,7 +2280,6 @@ class JavaScriptAnalyzer:
         self._check_eval_injection()
         self._check_command_injection()
         self._check_sql_injection()
-        self._check_ssrf()
         self._check_deserialization()
         self._check_ssti()
         self._check_nosql_injection()
@@ -3035,82 +3032,6 @@ class JavaScriptAnalyzer:
                     self._add_finding(i, "SQL Injection - reduce() query construction",
                                       VulnCategory.SQL_INJECTION, Severity.MEDIUM, "MEDIUM",
                                       "SQL query potentially built via reduce().")
-
-    def _check_ssrf(self):
-        """Check for SSRF patterns."""
-        fetch_patterns = [
-            r'fetch\s*\(\s*(?!["\']https?://)',
-            r'axios\.(get|post|put|delete)\s*\(\s*(?!["\'])',
-            r'https?\.get\s*\(\s*(?!["\'])',
-            r'got\s*\(\s*(?!["\'])',
-            r'request\s*\(\s*(?!["\'])',
-        ]
-
-        # === CRITICAL: Config constants that are NOT user-controlled ===
-        # URLs constructed with these are safe from SSRF
-        safe_url_constants = [
-            r'API_URL',           # Common API base URL constant
-            r'BASE_URL',          # Base URL constant
-            r'SERVER_URL',        # Server URL constant
-            r'BACKEND_URL',       # Backend URL constant
-            r'HOST_URL',          # Host URL constant
-            r'ENDPOINT',          # Endpoint constant
-            r'process\.env\.',    # Environment variables (configured, not user input)
-            r'config\.',          # Config object properties
-            r'settings\.',        # Settings object properties
-            r'\.env\.',           # Env properties
-            r'import\.meta\.env', # Vite/modern bundler env
-            r'NEXT_PUBLIC_',      # Next.js public env vars
-            r'REACT_APP_',        # Create React App env vars
-            r'VITE_',             # Vite env vars
-            r'API_BASE',          # API base constant
-            r'_BASE\s*=',         # Any _BASE constant assignment
-            r'_URL\s*=',          # Any _URL constant assignment
-            r'localhost',         # Hardcoded localhost (not user-controlled)
-            r'127\.0\.0\.1',      # Hardcoded loopback IP
-            r':3000["\']',        # Common dev port
-            r':3001["\']',        # Common dev port
-            r':8080["\']',        # Common dev port
-            r':5000["\']',        # Common dev port
-        ]
-
-        for i, line in enumerate(self.source_lines, 1):
-            for pattern in fetch_patterns:
-                if re.search(pattern, line):
-                    # Check for user input
-                    has_taint = any(var in line for var in self.tainted_vars)
-                    has_req_input = 'req.' in line or 'request.' in line
-
-                    # Check if URL uses safe config constants
-                    uses_safe_constant = any(re.search(const, line) for const in safe_url_constants)
-
-                    # Check for numeric-only interpolation (e.g., /resources/${id} where id is numeric)
-                    # These are low risk since integers can't contain SSRF payloads
-                    interps = re.findall(r'\$\{([^}]+)\}', line)
-                    numeric_id_patterns = [
-                        r'^id$', r'^.*Id$', r'^.*_id$', r'^\d+$',  # Common ID patterns
-                        r'^item$', r'^index$', r'^page$', r'^limit$', r'^offset$',  # Numeric params
-                        r'^count$', r'^num$', r'^number$', r'^position$',  # Numeric values
-                    ]
-                    is_numeric_only_interp = interps and all(
-                        any(re.match(pat, interp.strip(), re.IGNORECASE) for pat in numeric_id_patterns)
-                        for interp in interps
-                    )
-
-                    if has_taint or has_req_input:
-                        self._add_finding(i, "SSRF - HTTP request with user-controlled URL",
-                                          VulnCategory.SSRF, Severity.HIGH, "HIGH",
-                                          "User-controlled URL in HTTP request.")
-                    elif ('${' in line or '" +' in line) and not uses_safe_constant:
-                        if is_numeric_only_interp:
-                            self._add_finding(i, "SSRF - HTTP request with numeric ID in URL (lower risk)",
-                                              VulnCategory.SSRF, Severity.LOW, "LOW",
-                                              "URL uses numeric ID interpolation. Lower risk since integers "
-                                              "can't contain SSRF payloads. Verify ID is validated as integer.")
-                        else:
-                            self._add_finding(i, "SSRF - HTTP request with dynamic URL",
-                                              VulnCategory.SSRF, Severity.MEDIUM, "MEDIUM",
-                                              "HTTP request with dynamic URL construction.")
 
     def _check_deserialization(self):
         """Check for deserialization vulnerabilities - including evasion techniques."""
@@ -4249,7 +4170,6 @@ class JavaAnalyzer:
         self._check_sql_injection()
         self._check_command_injection()
         self._check_deserialization()
-        self._check_ssrf()
         self._check_xxe()
         self._check_jndi_injection()
         self._check_script_engine()
@@ -4642,48 +4562,6 @@ class JavaAnalyzer:
                                       description="new Yaml() without SafeConstructor allows arbitrary object instantiation. "
                                       "If used with untrusted input, RCE is possible. "
                                       "Use: new Yaml(new SafeConstructor())")
-
-    def _check_ssrf(self):
-        """Check for SSRF patterns."""
-        for i, line in enumerate(self.source_lines, 1):
-            stripped = line.strip()
-            if stripped.startswith('//') or stripped.startswith('/*') or stripped.startswith('*'):
-                continue
-
-            # URL construction with tainted data
-            if re.search(r'new\s+URL\s*\(', line):
-                is_tainted, taint_var = self._is_tainted(line)
-                if is_tainted:
-                    self._add_finding(i, "SSRF - URL constructed with tainted data",
-                                      VulnCategory.SSRF, Severity.HIGH, "HIGH", taint_var,
-                                      "User-controlled data used in URL construction.")
-
-            # URI construction
-            if re.search(r'new\s+URI\s*\(', line):
-                is_tainted, taint_var = self._is_tainted(line)
-                if is_tainted:
-                    self._add_finding(i, "SSRF - URI constructed with tainted data",
-                                      VulnCategory.SSRF, Severity.HIGH, "HIGH", taint_var,
-                                      "User-controlled data used in URI construction.")
-
-            # openConnection, openStream
-            if re.search(r'\.(?:openConnection|openStream)\s*\(', line):
-                is_tainted, taint_var = self._is_tainted(line)
-                context = '\n'.join(self.source_lines[max(0, i-3):i+1])
-                taint_in_context, ctx_var = self._is_tainted(context)
-                if is_tainted or taint_in_context:
-                    self._add_finding(i, "SSRF - HTTP connection with potentially tainted URL",
-                                      VulnCategory.SSRF, Severity.HIGH, "HIGH", taint_var or ctx_var,
-                                      "HTTP request made with potentially user-controlled URL.")
-
-            # HttpURLConnection
-            if re.search(r'HttpURLConnection', line):
-                context = '\n'.join(self.source_lines[max(0, i-5):i+1])
-                taint_in_context, ctx_var = self._is_tainted(context)
-                if taint_in_context:
-                    self._add_finding(i, "SSRF - HttpURLConnection with tainted URL",
-                                      VulnCategory.SSRF, Severity.HIGH, "MEDIUM", ctx_var,
-                                      "HTTP connection may use user-controlled URL.")
 
     def _check_xxe(self):
         """Check for XXE patterns."""
@@ -6013,9 +5891,7 @@ class PHPAnalyzer:
         self._check_command_injection()
         self._check_strrev_evasion()
         self._check_code_injection()
-        self._check_file_inclusion()
         self._check_deserialization()
-        self._check_ssrf()
         # 2nd-order SQL injection detection
         self._check_second_order_sqli()
         self._check_json_poisoning_sqli()
@@ -6466,52 +6342,6 @@ class PHPAnalyzer:
                                       VulnCategory.CODE_INJECTION, Severity.HIGH, "HIGH", taint_var,
                                       "Sort function with user-controlled callback enables code execution.")
 
-    def _check_file_inclusion(self):
-        include_funcs = r'\b(include|include_once|require|require_once)\s*[\(\s]'
-
-        # Safe PHP magic constants (server-controlled, not user input)
-        safe_constants = [
-            r'__DIR__',           # Directory of current file
-            r'__FILE__',          # Full path of current file
-            r'dirname\s*\(\s*__', # dirname(__FILE__) or dirname(__DIR__)
-            r'ABSPATH',           # WordPress constant
-            r'BASEPATH',          # CodeIgniter constant
-            r'APPPATH',           # CodeIgniter constant
-            r'base_path\s*\(',    # Laravel helper
-            r'app_path\s*\(',     # Laravel helper
-            r'resource_path\s*\(',# Laravel helper
-        ]
-
-        for i, line in enumerate(self.source_lines, 1):
-            if line.strip().startswith('//'):
-                continue
-            if re.search(include_funcs, line):
-                # Skip if using safe server-controlled constants
-                uses_safe_constant = any(re.search(p, line) for p in safe_constants)
-                if uses_safe_constant:
-                    continue
-
-                # Check for allowlist validation patterns in preceding lines
-                # Look back up to 10 lines for in_array or switch/case validation
-                context_start = max(0, i - 10)
-                context_lines = '\n'.join(self.source_lines[context_start:i])
-
-                # Safe patterns: in_array check, switch statement, or basename usage
-                allowlist_patterns = [
-                    r'in_array\s*\(\s*\$\w+\s*,',  # in_array($var, ...)
-                    r'switch\s*\(\s*\$\w+\s*\)',   # switch($var)
-                    r'basename\s*\(',              # basename() sanitization
-                ]
-                has_allowlist = any(re.search(p, context_lines) for p in allowlist_patterns)
-                if has_allowlist:
-                    continue  # Safe: allowlist validation detected
-
-                is_tainted, taint_var = self._is_tainted(line)
-                if is_tainted:
-                    self._add_finding(i, "File Inclusion - LFI/RFI with tainted data",
-                                      VulnCategory.LFI_RFI, Severity.CRITICAL, "HIGH", taint_var,
-                                      "User input in file inclusion allows LFI/RFI.")
-
     def _check_deserialization(self):
         for i, line in enumerate(self.source_lines, 1):
             if line.strip().startswith('//'):
@@ -6547,19 +6377,6 @@ class PHPAnalyzer:
                                       VulnCategory.DESERIALIZATION, Severity.HIGH, "MEDIUM",
                                       description="unserialize() detected. Verify data source. "
                                       "Consider using ['allowed_classes' => false] option.")
-
-    def _check_ssrf(self):
-        url_funcs = r'\b(file_get_contents|curl_init|curl_setopt|fopen|readfile|get_headers)\s*\('
-
-        for i, line in enumerate(self.source_lines, 1):
-            if line.strip().startswith('//'):
-                continue
-            if re.search(url_funcs, line):
-                is_tainted, taint_var = self._is_tainted(line)
-                if is_tainted:
-                    self._add_finding(i, "SSRF - URL function with tainted data",
-                                      VulnCategory.SSRF, Severity.HIGH, "HIGH", taint_var,
-                                      "User-controlled URL in request function.")
 
     def _check_second_order_sqli(self):
         """Detect 2nd-order SQLi with database-sourced values in UPDATE/DELETE."""
@@ -7086,7 +6903,6 @@ class CSharpAnalyzer:
         self._check_xxe()
         self._check_ldap_injection()
         self._check_xpath_injection()
-        self._check_ssrf()
         self._check_ssti()
         self._check_viewstate_vulnerabilities()
         # 2nd-order SQL injection detection
@@ -7784,43 +7600,6 @@ class CSharpAnalyzer:
                         )
                         break
 
-    def _check_ssrf(self):
-        """Detect Server-Side Request Forgery vulnerabilities."""
-        http_sinks = [
-            r'HttpClient', r'WebClient', r'WebRequest',
-            r'\.GetAsync\s*\(', r'\.PostAsync\s*\(', r'\.SendAsync\s*\(',
-            r'\.DownloadString\s*\(', r'\.DownloadData\s*\(',
-            r'\.GetStringAsync\s*\(', r'\.GetByteArrayAsync\s*\(',
-            r'HttpWebRequest\.Create\s*\(', r'WebRequest\.Create\s*\(',
-            r'\.OpenRead\s*\(', r'\.UploadString\s*\(',
-        ]
-
-        for i, line in enumerate(self.source_lines, 1):
-            if line.strip().startswith('//'):
-                continue
-
-            for sink in http_sinks:
-                if re.search(sink, line):
-                    is_tainted, taint_var = self._is_tainted(line)
-                    # Also check context for taint (laundered URLs)
-                    context = '\n'.join(self.source_lines[max(0, i-5):i+1])
-                    context_tainted, context_taint_var = self._is_tainted(context)
-
-                    if is_tainted:
-                        self._add_finding(i, "SSRF - HTTP request with user-controlled URL",
-                                          VulnCategory.SSRF, Severity.HIGH, "HIGH", taint_var,
-                                          "User input used as URL in HTTP request. Validate/allowlist URLs.")
-                    elif context_tainted:
-                        # Check for URL transformation (laundering)
-                        if re.search(r'\.Trim\(|\.ToLower\(|\.Replace\(|Uri\(', context):
-                            self._add_finding(i, "SSRF - HTTP request with transformed user URL",
-                                              VulnCategory.SSRF, Severity.HIGH, "HIGH", context_taint_var,
-                                              "User URL transformed before HTTP request. URL laundering detected.")
-                        else:
-                            self._add_finding(i, "SSRF - HTTP request with potentially tainted URL",
-                                              VulnCategory.SSRF, Severity.MEDIUM, "MEDIUM", context_taint_var,
-                                              "User input may flow to HTTP request URL.")
-
     def _check_ssti(self):
         """Detect Server-Side Template Injection vulnerabilities."""
         template_sinks = [
@@ -8304,13 +8083,11 @@ class RubyAnalyzer:
         self._check_command_injection()
         self._check_code_injection()
         self._check_deserialization()
-        self._check_ssrf()
         self._check_ssti()
         # 2nd-order SQL injection detection
         self._check_structural_sqli()
         self._check_calculation_sqli()
         self._check_destructive_sqli()
-        self._check_path_traversal()
         return self.findings
 
     def _add_finding(self, line_num: int, vuln_name: str, category: VulnCategory,
@@ -8479,18 +8256,6 @@ class RubyAnalyzer:
                                       VulnCategory.DESERIALIZATION, Severity.HIGH, "MEDIUM",
                                       description="Marshal/YAML.load detected. Use YAML.safe_load instead.")
 
-    def _check_ssrf(self):
-        for i, line in enumerate(self.source_lines, 1):
-            if line.strip().startswith('#'):
-                continue
-
-            if re.search(r'Net::HTTP\.|HTTParty\.|RestClient\.|Faraday\.|open-uri|URI\.open', line):
-                is_tainted, taint_var = self._is_tainted(line)
-                if is_tainted:
-                    self._add_finding(i, "SSRF - HTTP request with tainted URL",
-                                      VulnCategory.SSRF, Severity.HIGH, "HIGH", taint_var,
-                                      "User-controlled URL in HTTP request.")
-
     def _check_ssti(self):
         for i, line in enumerate(self.source_lines, 1):
             if line.strip().startswith('#'):
@@ -8584,34 +8349,6 @@ class RubyAnalyzer:
                             description=f"String interpolation in {sink_type}() condition. "
                             "Use parameterized queries or sanitize input."
                         )
-
-    def _check_path_traversal(self):
-        """Check for path traversal / arbitrary file access in Ruby."""
-        for i, line in enumerate(self.source_lines, 1):
-            if line.strip().startswith('#'):
-                continue
-
-            # send_file with tainted path
-            if re.search(r'\bsend_file\b', line):
-                is_tainted, taint_var = self._is_tainted(line)
-                if is_tainted:
-                    self._add_finding(i, "Path Traversal - send_file with user-controlled path",
-                                      VulnCategory.CODE_INJECTION, Severity.HIGH, "HIGH", taint_var,
-                                      "User-controlled path in send_file allows arbitrary file download.")
-                else:
-                    # Check if the variable passed to send_file is tainted via backward context
-                    arg_match = re.search(r'send_file\s+(\w+)', line)
-                    if arg_match:
-                        arg_name = arg_match.group(1)
-                        for back in range(max(0, i - 8), i - 1):
-                            back_line = self.source_lines[back]
-                            if re.search(rf'\b{re.escape(arg_name)}\b\s*=', back_line):
-                                back_tainted, back_var = self._is_tainted(back_line)
-                                if back_tainted:
-                                    self._add_finding(i, "Path Traversal - send_file with user-controlled path",
-                                                      VulnCategory.CODE_INJECTION, Severity.HIGH, "HIGH", back_var,
-                                                      "User-controlled path flows into send_file, allowing arbitrary file download.")
-                                    break
 
 class ASTScanner:
     """Main scanner class that orchestrates AST-based analysis."""
@@ -9067,10 +8804,8 @@ def _build_stats_sidebar(scanner, findings: List[Finding], elapsed: float) -> Pa
     cat_abbrev = {
         "Insecure Direct Object Reference": "IDOR",
         "Server-Side Template Injection": "SSTI",
-        "Server-Side Request Forgery": "SSRF",
         "Insecure Deserialization": "Deserialization",
         "Authentication Bypass": "Auth Bypass",
-        "Local/Remote File Inclusion": "LFI/RFI",
         "XML External Entity": "XXE",
         "Information Disclosure": "Info Disclosure",
         "Command Injection": "Cmd Injection",

@@ -9,7 +9,6 @@ Features:
 - Source-to-sink taint tracking with multi-pass propagation
 - XSS detection (reflected, DOM-based)
 - Prototype pollution detection (for-in, Object.assign, spread, merge, etc.)
-- Path traversal (LFI/LFW) detection
 - Command injection detection
 - Inter-procedural taint flow analysis
 - Rich terminal UI with syntax highlighting
@@ -79,7 +78,6 @@ class VulnCategory(Enum):
     PROTOTYPE_POLLUTION = "Prototype Pollution"
     DANGEROUS_EVAL = "Dangerous Eval"
     OPEN_REDIRECT = "Open Redirect"
-    PATH_TRAVERSAL = "Path Traversal"
     COMMAND_INJECTION = "Command Injection"
 
 
@@ -199,27 +197,6 @@ EXPRESS_SINKS = {
     'send': (VulnCategory.REFLECTED_XSS, Severity.HIGH, 'CWE-79'),
     'end': (VulnCategory.REFLECTED_XSS, Severity.HIGH, 'CWE-79'),
     'render': (VulnCategory.REFLECTED_XSS, Severity.MEDIUM, 'CWE-79'),
-}
-
-FS_SINKS = {
-    'readFile': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
-    'readFileSync': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
-    'readdir': (VulnCategory.PATH_TRAVERSAL, Severity.HIGH, 'CWE-22'),
-    'readdirSync': (VulnCategory.PATH_TRAVERSAL, Severity.HIGH, 'CWE-22'),
-    'writeFile': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
-    'writeFileSync': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
-    'appendFile': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
-    'appendFileSync': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
-    'unlink': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
-    'unlinkSync': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
-    'rmdir': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
-    'rmdirSync': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
-    'stat': (VulnCategory.PATH_TRAVERSAL, Severity.MEDIUM, 'CWE-22'),
-    'statSync': (VulnCategory.PATH_TRAVERSAL, Severity.MEDIUM, 'CWE-22'),
-    'access': (VulnCategory.PATH_TRAVERSAL, Severity.MEDIUM, 'CWE-22'),
-    'accessSync': (VulnCategory.PATH_TRAVERSAL, Severity.MEDIUM, 'CWE-22'),
-    'createReadStream': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
-    'createWriteStream': (VulnCategory.PATH_TRAVERSAL, Severity.CRITICAL, 'CWE-22'),
 }
 
 COMMAND_SINKS = {
@@ -1068,20 +1045,6 @@ class JSASTAnalyzer:
                                 f"Tainted data from '{taint.source_type}' reflected in HTTP response via {method}()",
                                 cwe, "Escape HTML entities before including in response, or use res.json()",
                                 source=taint.source_code, sink=f"res.{method}()"
-                            )
-
-                # FS sinks
-                elif method in FS_SINKS and obj_str in ('fs', 'require("fs")', "require('fs')"):
-                    if args:
-                        taint = self.tracker.is_tainted_node(args[0])
-                        if taint:
-                            cat, sev, cwe = FS_SINKS[method]
-                            self._add_finding(
-                                call, f"Path Traversal via fs.{method}()",
-                                cat, sev, 'HIGH',
-                                f"Tainted data from '{taint.source_type}' used as file path in fs.{method}().",
-                                cwe, "Validate and sanitize file paths. Use path.basename() or a whitelist.",
-                                source=taint.source_code, sink=f"fs.{method}()"
                             )
 
                 # Command sinks
