@@ -296,6 +296,8 @@ db.Products.FromSqlRaw(
 - XXE & XSLT Attacks
 - SSRF & SSTI
 - Insecure Deserialization
+- **IDOR** (Insecure Direct Object Reference)
+- **MFLAC** (Missing Function Level Access Control)
 
 ### Not Detected
 The following vulnerability types are **not** scanned:
@@ -321,6 +323,8 @@ The following vulnerability types are **not** scanned:
 | Deserialization | Excellent | Double-unserialize | ViewState, SnakeYAML |
 | XXE/XSLT | Excellent | - | XmlResolver |
 | Expression Language | Excellent | - | SpEL, OGNL, MVEL, EL |
+| IDOR | Excellent | - | Destructuring, mass assignment |
+| MFLAC | Excellent | - | AST-based (Java), route analysis |
 
 ### Multi-Language Test Validation
 
@@ -328,14 +332,14 @@ The scanner has been validated against comprehensive test suites covering all vu
 
 | Language | Framework | True Positives | Categories Covered |
 |----------|-----------|:--------------:|:-------------------|
-| **Java** | Spring Boot, JPA/Hibernate | 50+ | SQL/HQL/NoSQL, Command, Code (SpEL, OGNL, MVEL), XPath, XXE, XSLT, SSRF, SSTI, Deserialization |
-| **Python** | Flask, Django | 35+ | SQL/NoSQL, Command, Code, XPath, XXE, SSRF, SSTI, Deserialization, Evasion |
-| **JavaScript** | Express.js, Node.js | 40+ | SQL/NoSQL, Command, Code (eval, vm), XPath, XXE, SSRF, SSTI, Deserialization |
-| **TypeScript** | NestJS, Express, TypeORM | 45+ | SQL/NoSQL, Command, Code, XPath, XXE, SSRF, SSTI, Deserialization |
-| **PHP** | Laravel, Symfony | 40+ | SQL/NoSQL, Command, Code, XPath, XXE, XSLT, SSRF, SSTI, Deserialization, Evasion |
-| **C#** | ASP.NET, Entity Framework | 35+ | SQL/NoSQL, Command, Code, XPath, XXE, XSLT, SSRF, SSTI, Deserialization, Evasion |
-| **Ruby** | Rails, ActiveRecord | 30+ | SQL/NoSQL, Command, Code, XPath, XXE, SSRF, SSTI, Deserialization, Evasion |
-| **Go** | GORM, net/http | 25+ | SQL, Command, Code (template), XPath, XXE, SSRF, SSTI, Deserialization |
+| **Java** | Spring Boot, JPA/Hibernate | 50+ | SQL/HQL/NoSQL, Command, Code (SpEL, OGNL, MVEL), XPath, XXE, XSLT, SSRF, SSTI, Deserialization, IDOR, MFLAC |
+| **Python** | Flask, Django | 35+ | SQL/NoSQL, Command, Code, XPath, XXE, SSRF, SSTI, Deserialization, Evasion, IDOR, MFLAC |
+| **JavaScript** | Express.js, Node.js | 40+ | SQL/NoSQL, Command, Code (eval, vm), XPath, XXE, SSRF, SSTI, Deserialization, IDOR, MFLAC |
+| **TypeScript** | NestJS, Express, TypeORM | 45+ | SQL/NoSQL, Command, Code, XPath, XXE, SSRF, SSTI, Deserialization, IDOR, MFLAC |
+| **PHP** | Laravel, Symfony | 40+ | SQL/NoSQL, Command, Code, XPath, XXE, XSLT, SSRF, SSTI, Deserialization, Evasion, IDOR, MFLAC |
+| **C#** | ASP.NET, Entity Framework | 35+ | SQL/NoSQL, Command, Code, XPath, XXE, XSLT, SSRF, SSTI, Deserialization, Evasion, IDOR, MFLAC |
+| **Ruby** | Rails, ActiveRecord, Sinatra | 30+ | SQL/NoSQL, Command, Code, XPath, XXE, SSRF, SSTI, Deserialization, Evasion, IDOR, MFLAC |
+| **Go** | GORM, net/http | 25+ | SQL, Command, Code (template), XPath, XXE, SSRF, SSTI, Deserialization, IDOR, MFLAC |
 
 **Test categories include:**
 - SQL/NoSQL/HQL Injection (string concat, format, interpolation, 2nd-order)
@@ -346,6 +350,8 @@ The scanner has been validated against comprehensive test suites covering all vu
 - SSRF (requests, HttpClient, cURL, Net::HTTP, axios, fetch)
 - SSTI (Jinja2, Twig, ERB, Freemarker, Velocity, Blade, EJS)
 - Insecure Deserialization (pickle, unserialize, Marshal, BinaryFormatter, SnakeYAML, node-serialize)
+- IDOR (direct object lookup, mass assignment, path traversal in object access)
+- MFLAC (missing auth middleware, auth-only guards on admin endpoints, privilege escalation sinks)
 
 ---
 
@@ -356,7 +362,10 @@ The scanner has been validated against comprehensive test suites covering all vu
 git clone https://github.com/worldtreeboy/vulnhunter.git
 cd vulnhunter
 
-# Scan a project (no dependencies required!)
+# Install dependencies
+pip3 install -r requirements.txt
+
+# Scan a project
 python3 vulnhunter.py /path/to/project
 
 # Scan single file
@@ -396,6 +405,40 @@ The scanner tracks data from these **entity sources**:
 | **XPath** | `xpath.evaluate()`, `SelectNodes()`, `DOMXPath->query()` |
 | **Command** | `Process.Start()`, `Runtime.exec()`, `os.system()`, `exec()` |
 | **Code** | `eval()`, `ScriptEngine.eval()`, `df.query()`, `df.eval()` |
+
+---
+
+## IDOR & MFLAC Detection
+
+VulnHunter detects **Insecure Direct Object Reference (IDOR)** and **Missing Function Level Access Control (MFLAC)** across all 8 supported languages.
+
+### IDOR Patterns Detected
+
+| Pattern | Languages | Example |
+|---------|-----------|---------|
+| **Direct DB lookup by user ID** | All | `repo.findById(req.params.id)`, `Model.objects.get(pk=request.GET['id'])` |
+| **Hash/dict access by user input** | Python, JS, Ruby, PHP | `invoices.get(invoice_id)`, `users[params[:id]]` |
+| **Collection lookup without ownership** | C#, Java | `_records.Find(r => r.Id == id)`, `documents.get(docId)` |
+| **Mass assignment** | All | `Model.update(req.body)`, `User(**request.data)`, `params.permit!` |
+| **Destructuring to DB lookup** | JS/TS | `const { userId } = req.params; data[userId]` |
+
+### MFLAC Patterns Detected
+
+| Pattern | Languages | Example |
+|---------|-----------|---------|
+| **Admin route without auth** | All | `@app.route('/admin/...')` without `@login_required` |
+| **Auth-only on admin endpoint** | All | `[Authorize]` without `Roles="Admin"`, `isLoggedIn` without `isAdmin` |
+| **Missing security annotation** | Java | `@GetMapping("/admin/reset")` without `@PreAuthorize` (AST-based) |
+| **Privilege escalation sinks** | Java | `updateRole()`, `promoteToAdmin()` with auth-only guard |
+| **Sinatra/Express unprotected routes** | Ruby, JS | `get '/admin' do` without role check |
+
+### False Positive Reduction
+
+- Ownership checks detected (e.g., `record.OwnerId != currentUserId`, `invoice['user_id'] != get_current_user()`)
+- Scoped queries recognized (e.g., `current_user.orders.find(...)`)
+- Role checks in method body suppress MFLAC (e.g., `User.IsInRole("Admin")`, `user['role'] == 'admin'`)
+- Function definitions excluded from auth context matching
+- String literals in route attributes excluded from brace-depth analysis
 
 ---
 
@@ -799,23 +842,16 @@ Vulnerabilities Found: 8
 vulnhunter/
 ├── vulnhunter.py          # Multi-language SAST scanner
 ├── jshunter.py            # Specialized JavaScript vulnerability scanner
+├── requirements.txt       # Python dependencies
 ├── README.md
 ├── LICENSE
 └── test-files/
-    ├── vulnerability-tests-python.py     # Python/Flask/Django tests (TP/FP)
-    ├── vulnerability-tests-javascript.js # JavaScript/Express/Node.js tests
-    ├── vulnerability-tests-typescript.ts # TypeScript/NestJS/TypeORM tests
-    ├── vulnerability-tests-java.java     # Java/Spring core tests
-    ├── vulnerability-tests-spring.java   # Spring Boot/JPA/Hibernate tests
-    ├── vulnerability-tests-php.php       # PHP core tests
-    ├── vulnerability-tests-laravel.php   # Laravel/Symfony tests
-    ├── vulnerability-tests-csharp.cs     # C#/ASP.NET/Entity Framework tests
-    ├── vulnerability-tests-ruby.rb       # Ruby/Rails/ActiveRecord tests
-    ├── vulnerability-tests-go.go         # Go/GORM tests
-    ├── 2nd-order-*.java/php              # 2nd-order injection tests
-    ├── evasive-*.js/py/php               # Evasion technique tests
-    ├── xss-tests.js                      # XSSHunter JavaScript test cases
-    ├── xss-tests.html                    # XSSHunter HTML test cases
+    ├── vulnerability-tests-*.ext        # Core vulnerability tests per language
+    ├── 2nd-order-*.java/php             # 2nd-order injection tests
+    ├── evasive-*.js/py/php              # Evasion technique tests
+    ├── idor-access-control-tests.*      # IDOR test cases per language
+    ├── mflac-tests.*                    # MFLAC test cases per language
+    ├── xss-tests.js                     # JSHunter JavaScript test cases
     └── ...
 ```
 
