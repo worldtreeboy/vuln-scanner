@@ -14,8 +14,6 @@ Detection Categories:
 - SSRF (URL, HttpClient, RestTemplate, WebClient)
 - XXE (DocumentBuilderFactory, SAXParser, XMLInputFactory)
 - XPath Injection (XPath.evaluate/compile with tainted concat)
-- IDOR (findById/getOne with @PathVariable without ownership check)
-- MFLAC (admin endpoints without @PreAuthorize/@Secured/@RolesAllowed)
 - Reflection Injection (Class.forName, getMethod with tainted input)
 - Second-order SQLi (DB-fetched values in raw SQL)
 """
@@ -84,7 +82,6 @@ class VulnCategory(Enum):
     SSRF = "Server-Side Request Forgery"
     XPATH_INJECTION = "XPath Injection"
     XXE = "XML External Entity"
-    IDOR = "Insecure Direct Object Reference"
 
 
 @dataclass
@@ -622,14 +619,9 @@ class JavaASTAnalyzer:
             self._check_reflection(method, tracker)
             self._check_xpath_injection(method, tracker)
             self._check_ssti(method, tracker)
-            self._check_idor(method, tracker, method_annots, cls_annots)
             self._check_mass_assignment(method, tracker, method_annots)
             self._check_second_order_sqli(method, tracker)
             self._check_nosql_injection(method, tracker)
-
-        # Class-level checks
-        for cls in self.classes:
-            self._check_mflac(cls)
 
         return self.findings
 
@@ -1414,233 +1406,6 @@ class JavaASTAnalyzer:
     # IDOR Detection
     # ========================================================================
 
-    def _check_idor(self, method: Node, tracker: TaintTracker,
-                    method_annots: List[Tuple[str, str]], cls_annots: List[Tuple[str, str]]):
-        """Detect Insecure Direct Object References."""
-        body = get_child_by_type(method, "block")
-        if not body:
-            return
-
-        # Check if method has auth annotations (reduces severity)
-        has_auth = any(name in self.AUTH_ANNOTATIONS for name, _ in method_annots + cls_annots)
-        if has_auth:
-            return  # Has proper authorization, skip
-
-        # Find direct entity lookups by user-supplied ID
-        lookup_methods = {"findById", "findOne", "getOne", "getReferenceById",
-                         "getById", "findByIdAndDelete", "deleteById"}
-
-        # EntityManager/Session direct lookups
-        em_lookup_methods = {"find", "getReference"}
-        session_lookup_methods = {"get", "load"}
-
-        body_text = node_text(body)
-        has_ownership = self._has_ownership_check(body_text)
-
-        for mi in find_nodes(body, "method_invocation"):
-            called = self._get_called_method_name(mi)
-            args = get_child_by_type(mi, "argument_list")
-            if not args:
-                continue
-
-            line = get_node_line(mi)
-            receiver = self._get_receiver(mi)
-            recv_text = node_text(receiver) if receiver else ""
-
-            # Repository lookups (findById, deleteById, etc.)
-            if called in lookup_methods:
-                first = self._get_first_arg(args)
-                if not first:
-                    continue
-                first_text = node_text(first)
-                if tracker.is_tainted(first_text):
-                    if has_ownership:
-                        continue
-                    self._add_finding(
-                        line, 0,
-                        "IDOR - Direct entity lookup by ID",
-                        VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                        tracker.get_taint_chain(first_text),
-                        f"User-supplied ID passed to {called}() without ownership verification."
-                    )
-
-            # EntityManager.find(Class, id)
-            elif called in em_lookup_methods and re.search(r'(?:em|entityManager|manager)\b', recv_text, re.IGNORECASE):
-                all_args = self._get_all_args(args)
-                # find(Class, id) — the id is the second argument
-                id_arg = all_args[1] if len(all_args) >= 2 else None
-                if id_arg and tracker.is_tainted(node_text(id_arg)):
-                    if has_ownership:
-                        continue
-                    self._add_finding(
-                        line, 0,
-                        "IDOR - Direct EntityManager lookup by user-supplied ID",
-                        VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                        tracker.get_taint_chain(node_text(id_arg)),
-                        f"User-supplied ID passed to EntityManager.{called}() without ownership verification."
-                    )
-
-            # session.get(Class, id) / session.load(Class, id)
-            elif called in session_lookup_methods and re.search(r'session\b', recv_text, re.IGNORECASE):
-                all_args = self._get_all_args(args)
-                id_arg = all_args[1] if len(all_args) >= 2 else None
-                if id_arg and tracker.is_tainted(node_text(id_arg)):
-                    if has_ownership:
-                        continue
-                    self._add_finding(
-                        line, 0,
-                        "IDOR - Direct Hibernate session lookup by user-supplied ID",
-                        VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                        tracker.get_taint_chain(node_text(id_arg)),
-                        f"User-supplied ID passed to session.{called}() without ownership verification."
-                    )
-
-    def _has_ownership_check(self, body_text: str) -> bool:
-        """Check if method body contains ownership/authorization checks."""
-        ownership_patterns = [
-            r'currentUser\s*\.\s*getId\s*\(\s*\)',
-            r'getUser\s*\(\s*\)\s*\.\s*getId',
-            r'principal\s*\.\s*getName',
-            r'SecurityContextHolder',
-            r'authentication\s*\.\s*getPrincipal',
-            r'\.getOwner\s*\(',
-            r'\.getUserId\s*\(',
-            r'user\.getId\s*\(\s*\)\s*\.equals',
-        ]
-        for pattern in ownership_patterns:
-            if re.search(pattern, body_text):
-                return True
-        return False
-
-    # ========================================================================
-    # MFLAC Detection (Class-level)
-    # ========================================================================
-
-    def _check_mflac(self, cls: Node):
-        """Detect Missing Function Level Access Control on admin endpoints."""
-        cls_annots = self._get_class_annotations(cls)
-        cls_annot_names = {name for name, _ in cls_annots}
-
-        # Check class-level auth — distinguish role-based from auth-only
-        has_class_auth_only = self._has_auth_only_annotation(cls)
-        # Role-based auth: must be in AUTH_ANNOTATIONS AND not just isAuthenticated
-        has_class_role_auth = False
-        if cls_annot_names & self.AUTH_ANNOTATIONS:
-            if not has_class_auth_only:
-                has_class_role_auth = True
-
-        # Get class-level request mapping path
-        cls_path = ""
-        for name, val in cls_annots:
-            if name == "RequestMapping":
-                cls_path = val
-
-        cls_body = get_child_by_type(cls, "class_body")
-        if not cls_body:
-            return
-
-        for method in find_nodes(cls_body, "method_declaration"):
-            method_annots = self._get_method_annotations(method)
-            method_annot_names = {name for name, _ in method_annots}
-
-            # Skip if method has role-based auth annotation (with proper admin role)
-            if method_annot_names & self.AUTH_ANNOTATIONS:
-                # But check if it's auth-only (no admin role)
-                if self._method_has_auth_only(method):
-                    pass  # Fall through to check as auth-only
-                else:
-                    continue  # Proper role auth, skip
-
-            # Get endpoint path
-            endpoint_path = ""
-            is_endpoint = False
-            http_method = ""
-            for name, val in method_annots:
-                if name in self.ENDPOINT_ANNOTATIONS:
-                    is_endpoint = True
-                    endpoint_path = val
-                    http_method = name.replace("Mapping", "").upper()
-                    if name == "RequestMapping":
-                        http_method = "ANY"
-
-            if not is_endpoint:
-                continue
-
-            full_path = cls_path + "/" + endpoint_path if cls_path else endpoint_path
-            full_path = full_path.replace("//", "/")
-
-            # Check if it's an admin/sensitive endpoint
-            is_admin = bool(re.search(r'(?i)/admin|/manage|/system|/config|/internal', full_path))
-            is_destructive = http_method in ("DELETE", "PUT", "PATCH")
-            is_management = bool(re.search(r'(?i)/management|/reset|/purge|/clear', full_path))
-
-            if (is_admin or is_management) and not has_class_role_auth:
-                # Check for inline role checks in method body
-                if self._has_inline_role_check(method):
-                    continue
-
-                line = get_node_line(method)
-                if has_class_auth_only or self._method_has_auth_only(method):
-                    # Auth-only (isAuthenticated) but no role check
-                    self._add_finding(
-                        line, 0,
-                        "MFLAC - Admin endpoint with auth-only annotation",
-                        VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                        description=f"Endpoint '{full_path}' ({http_method}) uses isAuthenticated() but lacks role-based authorization."
-                    )
-                else:
-                    sev = Severity.CRITICAL if is_destructive else Severity.HIGH
-                    self._add_finding(
-                        line, 0,
-                        "MFLAC - Admin endpoint without authorization",
-                        VulnCategory.IDOR, sev, "HIGH",
-                        description=f"Endpoint '{full_path}' ({http_method}) lacks @PreAuthorize/@Secured/@RolesAllowed."
-                    )
-
-    def _has_auth_only_annotation(self, node: Node) -> bool:
-        """Check if a class/method has auth-only annotation (isAuthenticated, no admin role)."""
-        annots = get_annotations(node)
-        for name, ann_node in annots:
-            if name == "PreAuthorize":
-                val = get_annotation_value(ann_node)
-                if "isAuthenticated" in val and "hasRole" not in val and "hasAuthority" not in val:
-                    return True
-            if name == "Secured":
-                val = get_annotation_value(ann_node)
-                # @Secured("ROLE_USER") is auth-only (not admin-level)
-                if val and "ADMIN" not in val.upper():
-                    return True
-            if name == "RolesAllowed":
-                val = get_annotation_value(ann_node)
-                # @RolesAllowed("USER") is auth-only (not admin-level)
-                if val and "ADMIN" not in val.upper():
-                    return True
-            if name in ("Authenticated", "LoginRequired"):
-                return True
-        return False
-
-    def _method_has_auth_only(self, method: Node) -> bool:
-        """Check if a method has auth-only annotation."""
-        return self._has_auth_only_annotation(method)
-
-    def _has_inline_role_check(self, method: Node) -> bool:
-        """Check if method body has inline role/permission checks."""
-        body = get_child_by_type(method, "block")
-        if not body:
-            return False
-        body_text = node_text(body)
-        patterns = [
-            r'hasRole\s*\(', r'hasAuthority\s*\(', r'isAdmin\s*\(',
-            r'checkPermission\s*\(', r'hasPermission\s*\(',
-            r'\.getRoles\s*\(\s*\)\s*\.contains',
-            r'ROLE_ADMIN', r'"ADMIN"',
-        ]
-        return any(re.search(p, body_text) for p in patterns)
-
-    # ========================================================================
-    # Mass Assignment Detection
-    # ========================================================================
-
     def _check_mass_assignment(self, method: Node, tracker: TaintTracker,
                                 method_annots: List[Tuple[str, str]]):
         """Detect mass assignment via @RequestBody directly to save()."""
@@ -1959,7 +1724,6 @@ def _build_stats_sidebar(findings: List[Finding], file_count: int, elapsed: floa
     for f in findings:
         cat_counts[f.category.value] += 1
     cat_abbrev = {
-        "Insecure Direct Object Reference": "IDOR",
         "Server-Side Template Injection": "SSTI",
         "Server-Side Request Forgery": "SSRF",
         "Insecure Deserialization": "Deserialization",

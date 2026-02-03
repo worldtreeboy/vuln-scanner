@@ -155,10 +155,10 @@ def get_variable_name(node: Node) -> str:
 
 
 def is_superglobal(var_text: str) -> bool:
-    """Check if a variable text is a PHP superglobal."""
+    """Check if a variable text is a PHP superglobal (user-controlled)."""
     superglobals = {
         "$_GET", "$_POST", "$_REQUEST", "$_COOKIE",
-        "$_SERVER", "$_FILES", "$_ENV", "$_SESSION",
+        "$_SERVER", "$_FILES", "$_ENV",
     }
     # Check exact match or subscript access like $_GET["x"]
     for sg in superglobals:
@@ -168,9 +168,9 @@ def is_superglobal(var_text: str) -> bool:
 
 
 def is_superglobal_name(name: str) -> bool:
-    """Check if a bare name (without $) is a superglobal."""
+    """Check if a bare name (without $) is a superglobal (user-controlled)."""
     return name in ("_GET", "_POST", "_REQUEST", "_COOKIE",
-                    "_SERVER", "_FILES", "_ENV", "_SESSION")
+                    "_SERVER", "_FILES", "_ENV")
 
 
 # ============================================================================
@@ -196,13 +196,20 @@ class TaintTracker:
     }
 
     def __init__(self, func_node: Node, source_lines: List[str],
-                 is_public: bool = True):
+                 is_public: bool = True, scope_node: Node = None,
+                 pre_tainted: Dict[str, Tuple[int, str]] = None):
         self.func_node = func_node
         self.source_lines = source_lines
         # var_name -> (line_number, source_description)
         self.tainted: Dict[str, Tuple[int, str]] = {}
         # var_name -> (line_number, entity_source)
         self.db_sourced: Dict[str, Tuple[int, str]] = {}
+        # Optional override for the scope to analyze (for top-level code)
+        self._scope_node = scope_node
+
+        # Pre-seed taint from constructor analysis (cross-method taint)
+        if pre_tainted:
+            self.tainted.update(pre_tainted)
 
         self._init_taint_from_params(is_public)
         self._propagate_taint()
@@ -223,15 +230,83 @@ class TaintTracker:
                 param_name = node_text(var_node)
                 self.tainted[param_name] = (line, "function parameter")
 
+    def _get_scope(self) -> Optional[Node]:
+        """Get the scope node to analyze."""
+        if self._scope_node is not None:
+            return self._scope_node
+        return get_child_by_type(self.func_node, "compound_statement")
+
     def _propagate_taint(self):
         """Walk function body and propagate taint through assignments."""
-        body = get_child_by_type(self.func_node, "compound_statement")
+        body = self._get_scope()
         if not body:
             return
 
         # Multi-pass to handle forward references
         for _ in range(3):
             self._propagate_pass(body)
+
+        # Post-propagation: check for regex validation gates that clear taint
+        self._check_validation_gates(body)
+
+    def _check_validation_gates(self, body: Node):
+        """Remove taint from variables validated by anchored regex with exit() gates.
+
+        Pattern: if(!preg_match($pattern, $var)) { ... exit(); ... }
+        If the regex is anchored (^...$) and the failure branch exits,
+        then $var is validated — cannot contain SQL injection chars.
+        """
+        for if_stmt in find_nodes(body, "if_statement"):
+            cond_node = None
+            for child in if_stmt.children:
+                if child.type == "parenthesized_expression":
+                    cond_node = child
+                    break
+            if not cond_node:
+                continue
+            cond_text = node_text(cond_node)
+
+            # Match: !preg_match($pattern, $var) or !preg_match("...", $var)
+            m = re.search(
+                r'!\s*preg_match\s*\(\s*(\$\w+|["\'/][^)]+)\s*,\s*(\$\w+)\s*\)',
+                cond_text)
+            if not m:
+                continue
+
+            pattern_ref = m.group(1).strip()
+            var_text = m.group(2)
+
+            if var_text not in self.tainted:
+                continue
+
+            # Check if the if-body contains exit()/die()/return
+            if_body = get_child_by_type(if_stmt, "compound_statement")
+            if not if_body:
+                continue
+            body_text = node_text(if_body)
+            if not re.search(r'\b(?:exit|die|return)\b', body_text):
+                continue
+
+            # Resolve the regex pattern
+            pattern_literal = None
+            if pattern_ref.startswith('$'):
+                # Variable reference — find its assignment in scope
+                for assign in find_nodes(body, "assignment_expression"):
+                    children = assign.children
+                    if len(children) >= 3 and node_text(children[0]) == pattern_ref:
+                        pattern_literal = node_text(children[2]).strip().strip('"').strip("'")
+                        break
+            else:
+                pattern_literal = pattern_ref.strip('"').strip("'")
+
+            if not pattern_literal:
+                continue
+
+            # Check if the regex is anchored (^...$) — restrictive validation
+            inner = re.sub(r'^/(.+)/[a-z]*$', r'\1', pattern_literal)
+            if inner.startswith('^') and inner.endswith('$'):
+                # Anchored regex with exit gate — variable is validated
+                del self.tainted[var_text]
 
     # Functions that sanitize/neutralize tainted data
     SANITIZER_FUNCTIONS = {
@@ -243,6 +318,23 @@ class TaintTracker:
         "addslashes", "mysqli_real_escape_string", "mysql_real_escape_string",
         "pg_escape_string", "pg_escape_literal",
         "preg_quote", "urlencode", "rawurlencode",
+    }
+
+    # Functions whose return value does NOT carry taint (sinks / metadata)
+    TAINT_SINK_FUNCTIONS = {
+        # DB execution — return result resource, not user data
+        "mysqli_query", "mysqli_real_query", "mysql_query", "pg_query",
+        "sqlite_query", "mysql_db_query", "mysql_unbuffered_query",
+        # DB metadata — return integers/strings, not user data
+        "mysqli_num_rows", "mysqli_affected_rows", "mysqli_insert_id",
+        "mysqli_error", "mysqli_errno", "mysqli_field_count",
+        "mysql_num_rows", "mysql_affected_rows", "mysql_insert_id",
+        "mysql_error", "pg_num_rows", "pg_affected_rows", "pg_last_error",
+        # Output functions
+        "var_dump", "print_r", "var_export",
+        "header", "setcookie",
+        # Hash functions — output is fixed-format hex, not user data
+        "md5", "sha1", "hash", "crypt", "password_hash",
     }
 
     def _rhs_is_sanitized(self, rhs: Node, rhs_text: str) -> bool:
@@ -281,6 +373,29 @@ class TaintTracker:
                     del self.tainted[lhs_text]
                 continue
 
+            # Check if RHS calls a taint-sink function — return value is NOT tainted
+            if self._rhs_is_sink(rhs):
+                if lhs_text in self.tainted:
+                    del self.tainted[lhs_text]
+                # Still track DB-fetch results as db_sourced (for 2nd-order detection)
+                if self._rhs_is_db_source(rhs_text):
+                    self.db_sourced[lhs_text] = (line, rhs_text.strip())
+                continue
+
+            # Check if RHS is a DB fetch — track as db_sourced, kill taint
+            if self._rhs_is_db_source(rhs_text):
+                self.db_sourced[lhs_text] = (line, rhs_text.strip())
+                if lhs_text in self.tainted:
+                    del self.tainted[lhs_text]
+                continue
+
+            # Arithmetic operations force numeric conversion — result cannot
+            # contain SQL injection characters.  E.g. $page1 = ($page * 10) - 10
+            if self._rhs_is_arithmetic(rhs_text):
+                if lhs_text in self.tainted:
+                    del self.tainted[lhs_text]
+                continue
+
             # Check if RHS contains superglobal access
             if self._rhs_has_superglobal(rhs):
                 self.tainted[lhs_text] = (line, "from superglobal")
@@ -296,12 +411,37 @@ class TaintTracker:
                 self.tainted[lhs_text] = (line, "assigned from tainted data")
                 continue
 
-            # Track DB-sourced variables
-            if self._rhs_is_db_source(rhs_text):
-                self.db_sourced[lhs_text] = (line, rhs_text.strip())
+            # Propagate DB-sourced status through assignments
+            if self._rhs_refs_db_sourced(rhs_text, rhs):
+                self.db_sourced[lhs_text] = (line, "assigned from DB-sourced data")
             # If RHS is not tainted and LHS was previously tainted, remove taint (overwrite)
             elif lhs_text in self.tainted:
                 del self.tainted[lhs_text]
+
+    @staticmethod
+    def _rhs_is_arithmetic(rhs_text: str) -> bool:
+        """Check if RHS is a purely arithmetic expression (*, /, %, -, +).
+
+        Arithmetic forces numeric conversion in PHP, so the result cannot
+        contain SQL injection characters.  Only matches when there are no
+        string literals (quotes) in the expression.
+        """
+        # Must contain an arithmetic operator (*, /, %)
+        if not re.search(r'[\*/%]', rhs_text):
+            return False
+        # Must NOT contain string context (quotes)
+        if re.search(r'["\']', rhs_text):
+            return False
+        return True
+
+    def _rhs_is_sink(self, rhs: Node) -> bool:
+        """Check if RHS calls a taint-sink function (return value is not tainted)."""
+        calls = find_nodes(rhs, "function_call_expression")
+        for call in calls:
+            name_node = get_child_by_type(call, "name")
+            if name_node and node_text(name_node) in self.TAINT_SINK_FUNCTIONS:
+                return True
+        return False
 
     def _rhs_has_superglobal(self, rhs: Node) -> bool:
         """Check if RHS contains a superglobal reference."""
@@ -312,6 +452,9 @@ class TaintTracker:
                 return True
         return False
 
+    # getenv() keys that are NOT attacker-controlled (network stack values)
+    SAFE_GETENV_KEYS = {"REMOTE_ADDR", "REMOTE_PORT", "SERVER_ADDR", "SERVER_PORT"}
+
     def _rhs_is_taint_function(self, rhs: Node) -> bool:
         """Check if RHS is a function call that produces tainted data."""
         calls = find_nodes(rhs, "function_call_expression")
@@ -319,7 +462,15 @@ class TaintTracker:
             name_node = get_child_by_type(call, "name")
             if name_node:
                 func_name = node_text(name_node)
-                if func_name in ("getenv", "apache_getenv", "getallheaders"):
+                if func_name in ("getenv", "apache_getenv"):
+                    # Only taint if the key is attacker-controllable
+                    args = get_child_by_type(call, "arguments")
+                    if args:
+                        arg_text = node_text(args)
+                        if any(safe in arg_text for safe in self.SAFE_GETENV_KEYS):
+                            return False
+                    return True
+                if func_name == "getallheaders":
                     return True
                 if func_name == "file_get_contents":
                     args = get_child_by_type(call, "arguments")
@@ -334,6 +485,11 @@ class TaintTracker:
         for tainted_var in self.tainted:
             if re.search(rf'(?<!\w){re.escape(tainted_var)}(?!\w)', cleaned):
                 return True
+        # Also check tainted variables interpolated inside encapsed strings
+        for enc in find_nodes(rhs_node, "encapsed_string"):
+            for child in enc.children:
+                if child.type == "variable_name" and node_text(child) in self.tainted:
+                    return True
         return False
 
     def _rhs_is_db_source(self, rhs_text: str) -> bool:
@@ -347,6 +503,21 @@ class TaintTracker:
         for pattern in db_patterns:
             if re.search(pattern, rhs_text):
                 return True
+        return False
+
+    def _rhs_refs_db_sourced(self, rhs_text: str, rhs_node: Node = None) -> bool:
+        """Check if RHS references any DB-sourced variable (propagation)."""
+        cleaned = re.sub(r'"[^"]*"', '', rhs_text)
+        cleaned = re.sub(r"'[^']*'", '', cleaned)
+        for dv in self.db_sourced:
+            if re.search(rf'(?<!\w){re.escape(dv)}(?!\w)', cleaned):
+                return True
+        # Also check DB-sourced variables interpolated inside encapsed strings
+        if rhs_node is not None:
+            for enc in find_nodes(rhs_node, "encapsed_string"):
+                for child in enc.children:
+                    if child.type == "variable_name" and node_text(child) in self.db_sourced:
+                        return True
         return False
 
     def is_tainted(self, text: str) -> bool:
@@ -425,6 +596,13 @@ class PHPASTAnalyzer:
             if not any(f[0] == func for f in self.functions):
                 self.functions.append((func, None))
 
+    def _has_top_level_code(self) -> bool:
+        """Check if there are top-level statements outside functions/classes."""
+        for child in self.root.children:
+            if child.type == "expression_statement":
+                return True
+        return False
+
     def _get_func_name(self, func_node: Node) -> str:
         """Get function/method name from declaration."""
         name = get_child_by_type(func_node, "name")
@@ -471,24 +649,85 @@ class PHPASTAnalyzer:
 
     def analyze(self) -> List[Finding]:
         """Run all vulnerability checks."""
+        # First pass: analyze constructors to find tainted $this-> properties
+        class_tainted_props: Dict[int, Dict[str, Tuple[int, str]]] = {}
+        for func, cls in self.functions:
+            if cls is not None and id(cls) not in class_tainted_props:
+                class_tainted_props[id(cls)] = self._get_constructor_tainted_props(cls)
+
         for func, cls in self.functions:
             is_public = self._is_public_method(func)
-            tracker = TaintTracker(func, self.source_lines, is_public)
+            pre_tainted = class_tainted_props.get(id(cls)) if cls is not None else None
+            tracker = TaintTracker(func, self.source_lines, is_public,
+                                   pre_tainted=pre_tainted)
 
-            self._check_sql_injection(func, tracker)
-            self._check_command_injection(func, tracker)
-            self._check_code_injection(func, tracker)
-            self._check_deserialization(func, tracker)
-            self._check_lfi_rfi(func, tracker)
-            self._check_ssrf(func, tracker)
-            self._check_xxe(func, tracker)
-            self._check_xpath_injection(func, tracker)
-            self._check_path_traversal(func, tracker)
-            self._check_ssti(func, tracker)
-            self._check_nosql_injection(func, tracker)
-            self._check_second_order_sqli(func, tracker)
+            self._run_checks(func, tracker)
+
+        # Scan top-level code (statements outside any function/class)
+        if self._has_top_level_code():
+            self._analyze_top_level()
 
         return self.findings
+
+    def _get_constructor_tainted_props(self, cls: Node) -> Dict[str, Tuple[int, str]]:
+        """Analyze the class constructor to find which $this-> properties are tainted."""
+        decl_list = get_child_by_type(cls, "declaration_list")
+        if not decl_list:
+            return {}
+
+        constructor = None
+        for method in find_nodes(decl_list, "method_declaration"):
+            name = self._get_func_name(method)
+            if name == "__construct":
+                constructor = method
+                break
+
+        if not constructor:
+            return {}
+
+        # Create a taint tracker for the constructor (public params are tainted)
+        tracker = TaintTracker(constructor, self.source_lines, is_public=True)
+
+        # Extract $this-> properties that ended up tainted after propagation
+        # (the tracker already handles sanitizers, so this respects intval(), etc.)
+        tainted_props: Dict[str, Tuple[int, str]] = {}
+        for var, (line, source) in tracker.tainted.items():
+            if var.startswith("$this->"):
+                tainted_props[var] = (line, "from constructor parameter")
+
+        return tainted_props
+
+    def _run_checks(self, scope: Node, tracker: TaintTracker):
+        """Run all vulnerability checks against a scope node."""
+        self._check_sql_injection(scope, tracker)
+        self._check_command_injection(scope, tracker)
+        self._check_code_injection(scope, tracker)
+        self._check_deserialization(scope, tracker)
+        self._check_lfi_rfi(scope, tracker)
+        self._check_ssrf(scope, tracker)
+        self._check_xxe(scope, tracker)
+        self._check_xpath_injection(scope, tracker)
+        self._check_path_traversal(scope, tracker)
+        self._check_ssti(scope, tracker)
+        self._check_nosql_injection(scope, tracker)
+        self._check_second_order_sqli(scope, tracker)
+        self._check_sql_prepare_pattern(scope, tracker)
+        self._check_variable_function_call(scope, tracker)
+
+    def _analyze_top_level(self):
+        """Analyze top-level PHP code outside functions/classes."""
+        # Use the program root as the scope with a special tracker
+        tracker = TaintTracker(self.root, self.source_lines,
+                               is_public=True, scope_node=self.root)
+        self._run_checks(self.root, tracker)
+
+    def _get_body(self, func: Node) -> Optional[Node]:
+        """Get the body/scope node for analysis.
+        For functions/methods, returns compound_statement.
+        For top-level (program node), returns the node itself."""
+        if func.type == "program":
+            return func
+        return get_child_by_type(func, "compound_statement")
 
     # ========================================================================
     # SQL Injection Detection
@@ -496,7 +735,7 @@ class PHPASTAnalyzer:
 
     def _check_sql_injection(self, func: Node, tracker: TaintTracker):
         """Detect SQL injection via string concatenation in query calls."""
-        body = get_child_by_type(func, "compound_statement")
+        body = self._get_body(func)
         if not body:
             return
 
@@ -538,14 +777,18 @@ class PHPASTAnalyzer:
                             tracker.get_taint_chain(arg_text),
                             f"Tainted data concatenated into SQL query passed to {func_name}()."
                         )
-                    elif query_arg.type != "string" and query_arg.type != "encapsed_string" and tracker.is_tainted(arg_text):
-                        self._add_finding(
-                            line, 0,
-                            f"SQL Injection - Tainted variable in {func_name}",
-                            VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH",
-                            tracker.get_taint_chain(arg_text),
-                            f"Tainted variable used as query in {func_name}()."
-                        )
+                    elif query_arg.type not in ("string", "encapsed_string"):
+                        # Flow-sensitive check: the global taint state may be
+                        # stale if the variable was later overwritten with safe
+                        # data.  Always check the nearest assignment directly.
+                        if self._nearest_assignment_is_tainted(arg_text, line, body, tracker):
+                            self._add_finding(
+                                line, 0,
+                                f"SQL Injection - Tainted variable in {func_name}",
+                                VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH",
+                                tracker.get_taint_chain(arg_text),
+                                f"Tainted variable used as query in {func_name}()."
+                            )
 
         # Check method calls: $pdo->query(), $pdo->exec(), $pdo->prepare()
         method_calls = find_nodes(body, "member_call_expression")
@@ -576,14 +819,15 @@ class PHPASTAnalyzer:
                         tracker.get_taint_chain(arg_text),
                         f"Tainted data concatenated into SQL passed to ->{method_name}()."
                     )
-                elif first_arg.type not in ("string", "encapsed_string") and tracker.is_tainted(arg_text):
-                    self._add_finding(
-                        line, 0,
-                        f"SQL Injection - Tainted variable in ->{method_name}()",
-                        VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH",
-                        tracker.get_taint_chain(arg_text),
-                        f"Tainted variable used as query in ->{method_name}()."
-                    )
+                elif first_arg.type not in ("string", "encapsed_string"):
+                    if self._nearest_assignment_is_tainted(arg_text, line, body, tracker):
+                        self._add_finding(
+                            line, 0,
+                            f"SQL Injection - Tainted variable in ->{method_name}()",
+                            VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH",
+                            tracker.get_taint_chain(arg_text),
+                            f"Tainted variable used as query in ->{method_name}()."
+                        )
 
             # $pdo->prepare() with string concat (defeats parameterization)
             if method_name == "prepare":
@@ -610,7 +854,7 @@ class PHPASTAnalyzer:
 
     def _check_command_injection(self, func: Node, tracker: TaintTracker):
         """Detect command injection via exec, system, passthru, etc."""
-        body = get_child_by_type(func, "compound_statement")
+        body = self._get_body(func)
         if not body:
             return
 
@@ -665,7 +909,7 @@ class PHPASTAnalyzer:
 
     def _check_code_injection(self, func: Node, tracker: TaintTracker):
         """Detect code injection via eval, assert, create_function, preg_replace /e."""
-        body = get_child_by_type(func, "compound_statement")
+        body = self._get_body(func)
         if not body:
             return
 
@@ -762,7 +1006,7 @@ class PHPASTAnalyzer:
 
     def _check_deserialization(self, func: Node, tracker: TaintTracker):
         """Detect insecure deserialization via unserialize."""
-        body = get_child_by_type(func, "compound_statement")
+        body = self._get_body(func)
         if not body:
             return
 
@@ -809,7 +1053,7 @@ class PHPASTAnalyzer:
 
     def _check_lfi_rfi(self, func: Node, tracker: TaintTracker):
         """Detect Local/Remote File Inclusion via include/require with tainted path."""
-        body = get_child_by_type(func, "compound_statement")
+        body = self._get_body(func)
         if not body:
             return
 
@@ -860,7 +1104,7 @@ class PHPASTAnalyzer:
 
     def _check_ssrf(self, func: Node, tracker: TaintTracker):
         """Detect SSRF via file_get_contents, curl, fopen, SoapClient with tainted URLs."""
-        body = get_child_by_type(func, "compound_statement")
+        body = self._get_body(func)
         if not body:
             return
 
@@ -969,7 +1213,7 @@ class PHPASTAnalyzer:
 
     def _check_xxe(self, func: Node, tracker: TaintTracker):
         """Detect XXE via DOMDocument->loadXML, simplexml_load_string, XMLReader."""
-        body = get_child_by_type(func, "compound_statement")
+        body = self._get_body(func)
         if not body:
             return
 
@@ -1053,7 +1297,7 @@ class PHPASTAnalyzer:
 
     def _check_xpath_injection(self, func: Node, tracker: TaintTracker):
         """Detect XPath injection via DOMXPath->query/evaluate with tainted concat."""
-        body = get_child_by_type(func, "compound_statement")
+        body = self._get_body(func)
         if not body:
             return
 
@@ -1102,7 +1346,7 @@ class PHPASTAnalyzer:
 
     def _check_path_traversal(self, func: Node, tracker: TaintTracker):
         """Detect path traversal via file ops with tainted path."""
-        body = get_child_by_type(func, "compound_statement")
+        body = self._get_body(func)
         if not body:
             return
 
@@ -1163,7 +1407,7 @@ class PHPASTAnalyzer:
 
     def _check_ssti(self, func: Node, tracker: TaintTracker):
         """Detect server-side template injection in Twig, Blade, Smarty."""
-        body = get_child_by_type(func, "compound_statement")
+        body = self._get_body(func)
         if not body:
             return
 
@@ -1212,7 +1456,7 @@ class PHPASTAnalyzer:
 
     def _check_nosql_injection(self, func: Node, tracker: TaintTracker):
         """Detect NoSQL injection patterns (MongoDB)."""
-        body = get_child_by_type(func, "compound_statement")
+        body = self._get_body(func)
         if not body:
             return
 
@@ -1257,12 +1501,26 @@ class PHPASTAnalyzer:
 
     def _check_second_order_sqli(self, func: Node, tracker: TaintTracker):
         """Detect second-order SQL injection via DB-sourced data in queries."""
-        body = get_child_by_type(func, "compound_statement")
+        body = self._get_body(func)
         if not body:
             return
 
         if not tracker.db_sourced:
             return
+
+        # Helper: check if query arg has db-sourced data (concat or interpolation)
+        def _has_db_sourced_in_query(arg_node: Node) -> bool:
+            arg_text = node_text(arg_node)
+            # Check . concat with db-sourced data
+            if self._has_concat(arg_node) and tracker.is_db_sourced(arg_text):
+                return True
+            # Check encapsed string interpolation with db-sourced vars
+            if self._has_db_sourced_interpolation(arg_node, tracker):
+                return True
+            # Check if the variable itself is db-sourced (assigned earlier)
+            if arg_node.type not in ("string", "encapsed_string") and tracker.is_db_sourced(arg_text):
+                return True
+            return False
 
         # Check function calls
         sql_funcs = {"mysql_query", "mysqli_query", "pg_query"}
@@ -1285,13 +1543,13 @@ class PHPASTAnalyzer:
             elif all_args:
                 query_arg = all_args[0]
 
-            if query_arg and self._has_concat(query_arg) and tracker.is_db_sourced(node_text(query_arg)):
+            if query_arg and _has_db_sourced_in_query(query_arg):
                 line = get_node_line(call)
                 self._add_finding(
                     line, 0,
                     f"Second-order SQLi - DB-sourced data in {func_name}",
                     VulnCategory.SQL_INJECTION, Severity.HIGH, "MEDIUM",
-                    description="Data fetched from database used in string concatenation for SQL query."
+                    description="Data fetched from database used in SQL query construction."
                 )
 
         # Check method calls (->query, ->exec)
@@ -1308,14 +1566,195 @@ class PHPASTAnalyzer:
             if not first_arg:
                 continue
 
-            if self._has_concat(first_arg) and tracker.is_db_sourced(node_text(first_arg)):
+            if _has_db_sourced_in_query(first_arg):
                 line = get_node_line(mc)
                 self._add_finding(
                     line, 0,
                     f"Second-order SQLi - DB-sourced data in ->{method_name}()",
                     VulnCategory.SQL_INJECTION, Severity.HIGH, "MEDIUM",
-                    description="Data fetched from database concatenated into SQL query."
+                    description="Data fetched from database used in SQL query construction."
                 )
+
+    # ========================================================================
+    # SQL PREPARE Pattern Detection
+    # ========================================================================
+
+    def _check_sql_prepare_pattern(self, func: Node, tracker: TaintTracker):
+        """Detect MySQL-level dynamic SQL via PREPARE FROM with subquery-loaded variables.
+
+        Pattern: SET @var = (SELECT ...); PREPARE stmt FROM concat(@var); EXECUTE stmt;
+        This is a second-order injection at the SQL engine level.
+        """
+        body = self._get_body(func)
+        if not body:
+            return
+
+        # Collect all ->query() and global query calls with their SQL strings
+        sql_strings: List[Tuple[int, str]] = []
+
+        func_calls = find_nodes(body, "function_call_expression")
+        for call in func_calls:
+            name_node = get_child_by_type(call, "name")
+            if not name_node:
+                continue
+            func_name = node_text(name_node)
+            if func_name in ("mysql_query", "mysqli_query", "pg_query"):
+                args = get_child_by_type(call, "arguments")
+                if args:
+                    all_args = self._get_all_args(args)
+                    query_arg = None
+                    if func_name == "mysqli_query" and len(all_args) >= 2:
+                        query_arg = all_args[1]
+                    elif all_args:
+                        query_arg = all_args[0]
+                    if query_arg:
+                        sql_strings.append((get_node_line(call), node_text(query_arg)))
+
+        method_calls = find_nodes(body, "member_call_expression")
+        for mc in method_calls:
+            method_name = self._get_member_call_name(mc)
+            if method_name not in ("query", "exec"):
+                continue
+            args = get_child_by_type(mc, "arguments")
+            if args:
+                first_arg = self._get_first_arg(args)
+                if first_arg:
+                    sql_strings.append((get_node_line(mc), node_text(first_arg)))
+
+        # Look for PREPARE ... FROM pattern (server-side dynamic SQL)
+        has_set_from_select = False
+        for line, sql in sql_strings:
+            if re.search(r'(?i)\bSET\s+@\w+\s*=\s*\(\s*SELECT\b', sql):
+                has_set_from_select = True
+
+        if has_set_from_select:
+            for line, sql in sql_strings:
+                if re.search(r'(?i)\bPREPARE\b.*\bFROM\b', sql):
+                    self._add_finding(
+                        line, 0,
+                        "Second-order SQLi - Server-side PREPARE FROM with DB-loaded variable",
+                        VulnCategory.SQL_INJECTION, Severity.HIGH, "MEDIUM",
+                        description="MySQL PREPARE FROM builds SQL from a variable loaded via "
+                                    "SET @var = (SELECT ...). An attacker who controls the stored "
+                                    "value achieves SQL injection at the database engine level."
+                    )
+
+    # ========================================================================
+    # Variable Function Call Detection
+    # ========================================================================
+
+    def _check_variable_function_call(self, func: Node, tracker: TaintTracker):
+        """Detect variable function calls like $func($arg) where $func is tainted."""
+        body = self._get_body(func)
+        if not body:
+            return
+
+        func_calls = find_nodes(body, "function_call_expression")
+        for call in func_calls:
+            # Variable function call: the "function" part is a variable_name, not a name
+            name_node = get_child_by_type(call, "name")
+            if name_node:
+                continue  # Normal function call, handled by other checks
+
+            var_node = get_child_by_type(call, "variable_name")
+            if not var_node:
+                continue
+
+            var_text = node_text(var_node)
+            line = get_node_line(call)
+
+            if tracker.is_tainted(var_text):
+                self._add_finding(
+                    line, 0,
+                    "Code Injection - Variable function call with tainted name",
+                    VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH",
+                    tracker.get_taint_chain(var_text),
+                    f"User-controlled variable '{var_text}' used as function name allows arbitrary function execution."
+                )
+
+    # ========================================================================
+    # Flow-Sensitive Helpers
+    # ========================================================================
+
+    def _nearest_assignment_is_tainted(self, var_text: str, before_line: int,
+                                       scope: Node, tracker: TaintTracker,
+                                       _depth: int = 0) -> bool:
+        """Check if the nearest assignment to `var_text` before `before_line` is tainted.
+
+        This prevents false positives when a variable like $sql is reused across
+        independent code blocks — the flat taint tracker would say it's tainted
+        globally, but the assignment feeding THIS specific call may be static.
+        Uses recursive flow-sensitive analysis for interpolated variables.
+        """
+        if _depth > 4:
+            return tracker.is_tainted(var_text)
+
+        assignments = find_nodes(scope, "assignment_expression")
+        nearest_rhs = None
+        nearest_line = 0
+        for assign in assignments:
+            children = assign.children
+            if len(children) < 3:
+                continue
+            lhs_text = node_text(children[0])
+            line = get_node_line(assign)
+            if lhs_text == var_text and line < before_line and line > nearest_line:
+                nearest_rhs = children[2]
+                nearest_line = line
+
+        if nearest_rhs is None:
+            # No preceding assignment found — fall back to tracker
+            return tracker.is_tainted(var_text)
+
+        rhs_text = node_text(nearest_rhs)
+
+        # Check if the RHS contains interpolated variables (encapsed strings).
+        # If so, we must check each interpolated variable individually rather
+        # than applying blanket safe-checks (which would wrongly clear the
+        # whole expression if just ONE variable is db-sourced).
+        has_interpolation = bool(find_nodes(nearest_rhs, "encapsed_string"))
+
+        if not has_interpolation:
+            # Simple expression — blanket safe-checks apply
+            if tracker._rhs_is_db_source(rhs_text):
+                return False
+            if tracker._rhs_is_sanitized(nearest_rhs, rhs_text):
+                return False
+            if tracker._rhs_is_sink(nearest_rhs):
+                return False
+            if TaintTracker._rhs_is_arithmetic(rhs_text):
+                return False
+            if tracker._rhs_refs_db_sourced(rhs_text, nearest_rhs):
+                return False
+
+        # Check superglobal in RHS
+        if re.search(r'\$_(GET|POST|REQUEST|COOKIE|FILES|ENV)\b', rhs_text):
+            return True
+
+        # Check taint function calls
+        if tracker._rhs_is_taint_function(nearest_rhs):
+            return True
+
+        # Flow-sensitive: check interpolated variables in encapsed strings
+        for enc in find_nodes(nearest_rhs, "encapsed_string"):
+            for child in enc.children:
+                if child.type == "variable_name":
+                    inner_var = node_text(child)
+                    if inner_var in tracker.tainted:
+                        if self._nearest_assignment_is_tainted(
+                                inner_var, nearest_line, scope, tracker, _depth + 1):
+                            return True
+
+        # Check concatenated variables (not in strings)
+        cleaned = re.sub(r'"[^"]*"', '', rhs_text)
+        cleaned = re.sub(r"'[^']*'", '', cleaned)
+        for tv in list(tracker.tainted.keys()):
+            if re.search(rf'(?<!\w){re.escape(tv)}(?!\w)', cleaned):
+                if self._nearest_assignment_is_tainted(
+                        tv, nearest_line, scope, tracker, _depth + 1):
+                    return True
+
+        return False
 
     # ========================================================================
     # Utility Methods
@@ -1401,10 +1840,45 @@ class PHPASTAnalyzer:
         if "sprintf" in text and tracker.is_tainted(text):
             return True
 
+        # Check for tainted variable interpolation inside encapsed strings
+        if self._has_tainted_interpolation(node, tracker):
+            return True
+
+        return False
+
+    def _has_tainted_interpolation(self, node: Node, tracker: TaintTracker) -> bool:
+        """Check if a node contains tainted variables interpolated in double-quoted strings."""
+        encapsed = find_nodes(node, "encapsed_string")
+        for enc in encapsed:
+            for child in enc.children:
+                if child.type == "variable_name":
+                    var_text = node_text(child)
+                    if tracker.is_tainted(var_text):
+                        return True
+                # Handle {$var} and {$arr['key']} syntax
+                if child.type in ("member_access_expression", "subscript_expression"):
+                    child_text = node_text(child)
+                    if tracker.is_tainted(child_text):
+                        return True
+        return False
+
+    def _has_db_sourced_interpolation(self, node: Node, tracker: TaintTracker) -> bool:
+        """Check if a node contains DB-sourced variables interpolated in double-quoted strings."""
+        encapsed = find_nodes(node, "encapsed_string")
+        for enc in encapsed:
+            for child in enc.children:
+                if child.type == "variable_name":
+                    var_text = node_text(child)
+                    if tracker.is_db_sourced(var_text):
+                        return True
+                if child.type in ("member_access_expression", "subscript_expression"):
+                    child_text = node_text(child)
+                    if tracker.is_db_sourced(child_text):
+                        return True
         return False
 
     def _has_concat(self, node: Node) -> bool:
-        """Check if a node contains any string concatenation."""
+        """Check if a node contains any string concatenation or interpolation."""
         binaries = find_nodes(node, "binary_expression")
         for binary in binaries:
             for child in binary.children:
@@ -1413,6 +1887,14 @@ class PHPASTAnalyzer:
         text = node_text(node)
         if "sprintf" in text:
             return True
+        # Check for variable interpolation inside encapsed strings
+        encapsed = find_nodes(node, "encapsed_string")
+        for enc in encapsed:
+            for child in enc.children:
+                if child.type == "variable_name":
+                    return True
+                if child.type in ("member_access_expression", "subscript_expression"):
+                    return True
         return False
 
 

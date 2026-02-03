@@ -1352,4 +1352,149 @@ class RealWorldPatterns {
         $pdo->query("SELECT COUNT(*) FROM " . $entity);
     }
 }
+
+
+// ============================================================================
+// 21. TOP-LEVEL CODE & VARIABLE FUNCTION CALLS (ghost file patterns)
+// ============================================================================
+
+/** @expect VULN Deserialization — top-level unserialize from cookie (ghost.php pattern) */
+function FN_toplevel_deser_base64() {
+    $user_data = unserialize(base64_decode($_COOKIE['data']));
+}
+
+/** @expect VULN LFI/RFI — top-level include with concat (ghost2.php pattern) */
+function FN_toplevel_lfi_concat() {
+    $page = $_GET['page'];
+    include("pages/" . $page);
+}
+
+/** @expect VULN Code Injection — variable function call (ghost3.php pattern) */
+function FN_variable_function_call() {
+    $method = $_GET['action'];
+    $payload = $_GET['cmd'];
+    $method($payload);
+}
+
+/** @expect SAFE — variable function call with hardcoded name */
+function FP_variable_function_safe() {
+    $func = "strtolower";
+    $result = $func("HELLO");
+}
+
+/** @expect VULN Command Injection — shell_exec through taint chain (ghost4.php pattern) */
+function FN_shell_exec_concat_chain() {
+    $width = $_GET['width'];
+    $cmd = "convert image.jpg -resize " . $width . " thumb.jpg";
+    shell_exec($cmd);
+}
+
+// ==========================================================================
+// Section 22: Cross-Method Taint Propagation (ghost5.php pattern)
+// ==========================================================================
+
+class VulnUserProfile {
+    public $id;
+    private $db;
+
+    public function __construct($userId, $dbConnection) {
+        $this->id = $userId;
+        $this->db = $dbConnection;
+    }
+
+    /** @expect VULN SQL Injection — $this->id tainted from constructor param */
+    public function FN_cross_method_sqli_this_prop() {
+        $query = "SELECT * FROM profiles WHERE user_id = " . $this->id;
+        return $this->db->query($query);
+    }
+}
+
+class VulnConfigLoader {
+    private $path;
+
+    public function __construct($configPath) {
+        $this->path = $configPath;
+    }
+
+    /** @expect VULN Path Traversal — $this->path tainted from constructor param */
+    public function FN_cross_method_path_traversal() {
+        return file_get_contents($this->path);
+    }
+}
+
+class SafeUserProfile {
+    private $id;
+    private $db;
+
+    public function __construct($userId, $dbConnection) {
+        $this->id = intval($userId);
+        $this->db = $dbConnection;
+    }
+
+    /** @expect SAFE — $this->id sanitized with intval in constructor */
+    public function FP_cross_method_sanitized_constructor() {
+        $query = "SELECT * FROM profiles WHERE user_id = " . $this->id;
+        return $this->db->query($query);
+    }
+}
+
+// ==========================================================================
+// Section 23: Encapsed String Interpolation in SQL (ghost8 pattern)
+// ==========================================================================
+
+class EncapsedSQLTests {
+    /** @expect VULN SQL Injection — tainted var interpolated in double-quoted SQL */
+    public function FN_sqli_encapsed_interpolation($db) {
+        $pref = $_GET['pref'];
+        $db->query("UPDATE settings SET val = '$pref' WHERE name = 'sort_order'");
+    }
+
+    /** @expect VULN SQL Injection — tainted var interpolated via curly syntax */
+    public function FN_sqli_encapsed_curly($db) {
+        $table = $_GET['table'];
+        $db->query("SELECT * FROM {$table} WHERE 1");
+    }
+
+    /** @expect SAFE — hardcoded interpolation */
+    public function FP_sqli_encapsed_hardcoded($db) {
+        $table = "users";
+        $db->query("SELECT * FROM $table WHERE active = 1");
+    }
+}
+
+// ==========================================================================
+// Section 24: Second-Order SQL Injection
+// ==========================================================================
+
+class SecondOrderTests {
+    /** @expect VULN Second-order SQLi — DB-fetched data concat'd into SQL */
+    public function FN_second_order_fetch_concat($db) {
+        $res = $db->query("SELECT username FROM users WHERE id = 1");
+        $user = $res->fetch_assoc();
+        $stored = $user['username'];
+        $sql = "UPDATE profiles SET name = '" . $stored . "'";
+        $db->query($sql);
+    }
+
+    /** @expect VULN Second-order SQLi — DB-fetched data interpolated into SQL */
+    public function FN_second_order_fetch_interpolation($db) {
+        $res = $db->query("SELECT username FROM users WHERE id = 1");
+        $row = $res->fetch_assoc();
+        $name = $row['name'];
+        $db->query("UPDATE profiles SET last_login = NOW() WHERE display_name = '$name'");
+    }
+
+    /** @expect VULN Second-order SQLi — PREPARE FROM with DB-loaded variable */
+    public function FN_second_order_prepare_from($db) {
+        $db->query("SET @table = (SELECT last_val FROM user_settings WHERE user_id = 1)");
+        $db->query("PREPARE stmt FROM 'OPTIMIZE TABLE ' + @table");
+        $db->query("EXECUTE stmt");
+    }
+
+    /** @expect SAFE — hardcoded PREPARE without SELECT subquery */
+    public function FP_prepare_hardcoded($db) {
+        $db->query("PREPARE stmt FROM 'SELECT * FROM users'");
+        $db->query("EXECUTE stmt");
+    }
+}
 ?>

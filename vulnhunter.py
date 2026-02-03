@@ -93,7 +93,6 @@ class VulnCategory(Enum):
     LFI_RFI = "Local/Remote File Inclusion"
     LDAP_INJECTION = "LDAP Injection"
     INFO_DISCLOSURE = "Information Disclosure"
-    IDOR = "Insecure Direct Object Reference"
 
 
 @dataclass
@@ -2044,407 +2043,6 @@ class PythonTaintTracker(ast.NodeVisitor):
                                    f"This function evaluates strings as Python expressions."
                     ))
 
-    def _check_idor(self):
-        """Check for Insecure Direct Object Reference / Broken Access Control vulnerabilities in Python."""
-
-        # Direct lookup patterns using user input (Django/SQLAlchemy ORM)
-        direct_lookup_patterns = [
-            (r'\.objects\.get\s*\(\s*(?:pk|id)\s*=\s*request\.(?:GET|POST|data|args|form|json)\b', "IDOR - Direct Django ORM lookup by user-supplied ID"),
-            (r'\.objects\.filter\s*\(\s*(?:pk|id)\s*=\s*request\.(?:GET|POST|data|args|form|json)\b', "IDOR - Direct Django ORM filter by user-supplied ID"),
-            (r'\.objects\.get\s*\(\s*(?:pk|id)\s*=\s*(?:pk|id|obj_id|object_id)\s*\)', "IDOR - Django ORM lookup by variable (check if user-supplied)"),
-            (r'get_object_or_404\s*\(\s*\w+\s*,\s*(?:pk|id)\s*=\s*(?:pk|id|request)', "IDOR - Django get_object_or_404 by user-supplied ID"),
-            (r'session\.query\s*\(\s*\w+\s*\)\.get\s*\(\s*request\.', "IDOR - SQLAlchemy session.query.get by user-supplied ID"),
-            (r'db\.session\.get\s*\(\s*\w+\s*,\s*request\.', "IDOR - SQLAlchemy session.get by user-supplied ID"),
-            (r'\.query\.get\s*\(\s*request\.', "IDOR - SQLAlchemy query.get by user-supplied ID"),
-            (r'\.query\.get_or_404\s*\(\s*request\.', "IDOR - Flask-SQLAlchemy get_or_404 by user-supplied ID"),
-        ]
-
-        # Mass assignment patterns
-        mass_assignment_patterns = [
-            (r'\w+\s*=\s*\w+\s*\(\s*\*\*request\.(?:json|data|form|POST|GET)', "IDOR - Mass assignment via **request.data unpacking"),
-            (r'\.objects\.create\s*\(\s*\*\*request\.(?:json|data|form|POST)', "IDOR - Mass assignment via Django ORM create with **request.data"),
-            (r'serializer\.save\s*\(\s*\)', "IDOR - DRF serializer.save() (check if serializer fields are restricted)"),
-            (r'\.update\s*\(\s*\*\*request\.(?:json|data|form|POST)', "IDOR - Mass assignment via update with **request.data"),
-        ]
-
-        # Missing auth decorator patterns
-        missing_auth_patterns = [
-            (r'@app\.route\s*\(\s*[\'"]\/admin\/', "IDOR - Admin route without apparent auth decorator"),
-            (r'@app\.route\s*\(\s*[\'"].*(?:delete|remove|update|edit)', "IDOR - Destructive route without apparent auth decorator"),
-        ]
-
-        # Auth context patterns (decorators and inline checks)
-        auth_context_patterns = [
-            r'@login_required', r'@permission_required', r'@staff_member_required',
-            r'@user_passes_test', r'LoginRequiredMixin', r'PermissionRequiredMixin',
-            r'IsAuthenticated', r'IsAdminUser', r'has_perm\(',
-            r'request\.user', r'current_user', r'g\.user',
-            r'user=request\.user', r'owner=request\.user', r'author=request\.user',
-            r'user_id=request\.user', r'created_by=request\.user',
-            r'@jwt_required', r'@token_required', r'@auth\.login_required',
-            r'@requires_auth', r'@authenticated',
-            r'check_object_permissions', r'has_object_permission',
-        ]
-
-        # Ownership verification patterns (actual comparison of user to resource)
-        ownership_patterns = [
-            r'session\s*\[\s*[\'"]user_id[\'"]\s*\]\s*[!=]==?\s*',
-            r'[!=]==?\s*session\s*\[\s*[\'"]user_id[\'"]',
-            r'session\.get\s*\(\s*[\'"]user_id[\'"]\s*\)\s*[!=]==?\s*',
-            r'user\s*=\s*request\.user', r'owner\s*=\s*request\.user',
-            r'created_by\s*=\s*request\.user',
-            r'current_user\.id\s*[!=]==?',
-            r'[!=]==?\s*current_user\.id',
-            r'g\.user\.id\s*[!=]==?',
-            r'\[.owner.\]\s*[!=]==?\s*.*session',
-            r'belongs_to.*current_user', r'\.user_id\s*==\s*current_user',
-            # Generic ownership check via helper functions
-            r'get_current_user\s*\(\s*\)', r'get_user_id\s*\(\s*\)',
-            r'\[.user_id.\]\s*[!=]=\s*(?!None)', r'\[.owner_id.\]\s*[!=]=',
-        ]
-
-        # ---- Phase 1: Collect Flask route parameter names ----
-        # Maps function_name -> set of route param names
-        route_params: Dict[str, set] = {}
-        current_route_params: set = set()
-        for i, line in enumerate(self.source_lines, 1):
-            route_match = re.search(r'@app\.route\s*\(\s*[\'"]([^\'"]+)[\'"]', line)
-            if route_match:
-                route_path = route_match.group(1)
-                current_route_params = set(re.findall(r'<(?:\w+:)?(\w+)>', route_path))
-            func_match = re.search(r'def\s+(\w+)\s*\(([^)]*)\)', line)
-            if func_match and current_route_params:
-                func_name = func_match.group(1)
-                route_params[func_name] = current_route_params
-                current_route_params = set()
-
-        # ---- Phase 2: Collect indirect taint sources ----
-        # Track variables assigned from request input within each function scope
-        # var_name -> (line_number, source_description)
-        tainted_locals: Dict[str, Tuple[int, str]] = {}
-        # Track vars assigned from request.json (for nested access in next step)
-        json_payload_vars: Dict[str, int] = {}
-
-        current_func_name: Optional[str] = None
-        current_func_route_params: set = set()
-
-        for i, line in enumerate(self.source_lines, 1):
-            stripped = line.strip()
-
-            # Track function boundaries
-            func_match = re.search(r'def\s+(\w+)\s*\(([^)]*)\)', line)
-            if func_match:
-                current_func_name = func_match.group(1)
-                current_func_route_params = route_params.get(current_func_name, set())
-                # Mark route params as tainted
-                func_params = [p.strip().split('=')[0].strip().split(':')[0].strip()
-                               for p in func_match.group(2).split(',') if p.strip()]
-                for param in func_params:
-                    if param in current_func_route_params:
-                        tainted_locals[param] = (i, f"route parameter <{param}>")
-
-            # request.args.get('key'), request.form.get('key'), etc.
-            req_get_match = re.search(r'(\w+)\s*=\s*request\.(?:args|form|values|cookies)\.get\s*\(\s*[\'"](\w+)[\'"]', line)
-            if req_get_match:
-                tainted_locals[req_get_match.group(1)] = (i, f"request.args.get('{req_get_match.group(2)}')")
-
-            # request.args['key']
-            req_bracket_match = re.search(r'(\w+)\s*=\s*request\.(?:args|form|values)\s*\[\s*[\'"](\w+)[\'"]', line)
-            if req_bracket_match:
-                tainted_locals[req_bracket_match.group(1)] = (i, f"request.args['{req_bracket_match.group(2)}']")
-
-            # var = request.json  (whole JSON body)
-            json_assign_match = re.search(r'(\w+)\s*=\s*request\.(?:json|get_json\s*\(\s*\))', line)
-            if json_assign_match:
-                json_payload_vars[json_assign_match.group(1)] = i
-
-            # var = data.get('key') where data = request.json
-            for jvar in json_payload_vars:
-                data_get_match = re.search(rf'(\w+)\s*=\s*{re.escape(jvar)}\.get\s*\(\s*[\'"](\w+)[\'"]', line)
-                if data_get_match:
-                    tainted_locals[data_get_match.group(1)] = (i, f"{jvar}.get('{data_get_match.group(2)}') [from request.json]")
-                data_bracket_match = re.search(rf'(\w+)\s*=\s*{re.escape(jvar)}\s*\[\s*[\'"](\w+)[\'"]', line)
-                if data_bracket_match:
-                    tainted_locals[data_bracket_match.group(1)] = (i, f"{jvar}['{data_bracket_match.group(2)}'] [from request.json]")
-
-            # Nested access: var = payload['a']['b']['c'] where payload = request.json
-            for jvar in json_payload_vars:
-                nested_match = re.search(rf'(\w+)\s*=\s*{re.escape(jvar)}(?:\s*\[\s*[\'"][^\'"]+[\'"]\s*\])+', line)
-                if nested_match:
-                    tainted_locals[nested_match.group(1)] = (i, f"nested access from {jvar} [request.json]")
-
-        # ---- Phase 3: Detect IDOR sinks ----
-        current_func_name = None
-        current_func_route_params = set()
-
-        for i, line in enumerate(self.source_lines, 1):
-            stripped = line.strip()
-            if stripped.startswith('#'):
-                continue
-
-            # Track function boundaries for route param context
-            func_match = re.search(r'def\s+(\w+)\s*\(', line)
-            if func_match:
-                current_func_name = func_match.group(1)
-                current_func_route_params = route_params.get(current_func_name, set())
-
-            context_start = max(0, i - 8)
-            context_end = min(len(self.source_lines), i + 8)
-            # Exclude function definitions and comments from context — a `def get_current_user():`
-            # line is a definition, not an actual auth/ownership check call.
-            # Comments like "# FP1: Has ownership check via get_current_user()" are also not checks.
-            context_lines = [l for l in self.source_lines[context_start:context_end]
-                             if not l.strip().startswith('def ') and not l.strip().startswith('#')]
-            context = '\n'.join(context_lines)
-
-            has_auth_context = any(re.search(pat, context) for pat in auth_context_patterns)
-            has_ownership = any(re.search(pat, context) for pat in ownership_patterns)
-
-            # ---- ORM direct lookup patterns (Django/SQLAlchemy) ----
-            for pattern, vuln_name in direct_lookup_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    if has_auth_context and has_ownership:
-                        continue
-                    elif has_auth_context:
-                        self._add_finding_simple(i, vuln_name,
-                                          VulnCategory.IDOR, Severity.MEDIUM, "LOW",
-                                          "Database lookup by user-supplied ID. Auth decorator present but no ownership verification found.")
-                    else:
-                        self._add_finding_simple(i, vuln_name,
-                                          VulnCategory.IDOR, Severity.HIGH, "MEDIUM",
-                                          "Database lookup uses user-supplied ID without authorization check. "
-                                          "Use request.user scoping to verify ownership.")
-
-            # ---- Vanilla dict/data access with Flask route params ----
-            for rparam in current_func_route_params:
-                dict_get_pat = rf'\w+(?:\[.+?\])*\.get\s*\(\s*{re.escape(rparam)}\s*\)'
-                dict_bracket_pat = rf'\w+(?:\[.+?\])*\s*\[\s*{re.escape(rparam)}\s*\]'
-                for sink_pat, sink_desc in [(dict_get_pat, '.get()'), (dict_bracket_pat, '[]')]:
-                    if re.search(sink_pat, line):
-                        if re.search(r'^\s*[\'"]', stripped) or re.search(r'^\s*\{', stripped):
-                            continue
-                        if has_auth_context and has_ownership:
-                            continue
-                        elif has_auth_context and not has_ownership:
-                            self._add_finding_simple(i, "IDOR - Data access with authentication but no ownership check",
-                                              VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                                              f"Route parameter '{rparam}' used to access data via {sink_desc}. "
-                                              f"Code checks if user is logged in but does NOT verify the requested "
-                                              f"resource belongs to the session user.")
-                        else:
-                            self._add_finding_simple(i, "IDOR - Data access by route parameter without authorization",
-                                              VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                                              f"Route parameter '{rparam}' used in data lookup via {sink_desc} "
-                                              f"without any authorization check.")
-
-            # ---- Vanilla dict/data access with tainted variable ----
-            for tvar, (tline, tsource) in tainted_locals.items():
-                # dict.get(tainted_var) or dict[tainted_var]
-                dict_get_pat = rf'\w+(?:\[.+?\])*\.get\s*\(\s*{re.escape(tvar)}\s*\)'
-                dict_bracket_pat = rf'\w+(?:\[.+?\])*\s*\[\s*{re.escape(tvar)}\s*\]'
-                for sink_pat, sink_desc in [(dict_get_pat, '.get()'), (dict_bracket_pat, '[]')]:
-                    if re.search(sink_pat, line):
-                        # Don't flag on the source line itself
-                        if i == tline:
-                            continue
-                        # Don't flag simple dict literal definitions
-                        if re.search(r'^\s*[\'"]', stripped) or re.search(r'^\s*\{', stripped):
-                            continue
-                        if has_auth_context and has_ownership:
-                            continue
-                        elif has_auth_context and not has_ownership:
-                            # Auth check exists but no ownership comparison — flawed auth
-                            self._add_finding_simple(i, "IDOR - Data access with authentication but no ownership check",
-                                              VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                                              f"Variable '{tvar}' (from {tsource}, line {tline}) used to access data. "
-                                              f"Code checks if user is logged in but does NOT verify the requested "
-                                              f"resource belongs to the session user.")
-                        else:
-                            self._add_finding_simple(i, "IDOR - Data access by user-supplied ID without authorization",
-                                              VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                                              f"Variable '{tvar}' (from {tsource}, line {tline}) used in data "
-                                              f"lookup via {sink_desc} without any authorization check.")
-
-            # ---- Direct request.args/json in dict access (no intermediate var) ----
-            direct_dict_pats = [
-                (r'\w+(?:\[.+?\])*\.get\s*\(\s*request\.(?:args|form|values)\.get\s*\(', "IDOR - Direct dict access by request parameter"),
-                (r'\w+(?:\[.+?\])*\s*\[\s*request\.(?:args|form|values)\.get\s*\(', "IDOR - Direct dict access by request parameter"),
-                (r'\w+(?:\[.+?\])*\.get\s*\(\s*request\.(?:args|form|values)\s*\[', "IDOR - Direct dict access by request parameter"),
-                (r'\w+(?:\[.+?\])*\s*\[\s*request\.(?:args|form|values)\s*\[', "IDOR - Direct dict access by request parameter"),
-            ]
-            for pattern, vuln_name in direct_dict_pats:
-                if re.search(pattern, line, re.IGNORECASE):
-                    if has_auth_context and has_ownership:
-                        continue
-                    self._add_finding_simple(i, vuln_name,
-                                      VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                                      "Request parameter used directly in data lookup without authorization check.")
-
-            # ---- ORM lookup with tainted variable as named argument ----
-            for tvar, (tline, tsource) in tainted_locals.items():
-                orm_tainted_pats = [
-                    (rf'\.objects\.get\s*\(\s*(?:pk|id)\s*=\s*{re.escape(tvar)}\b', f"IDOR - Django ORM lookup with tainted variable '{tvar}'"),
-                    (rf'\.objects\.filter\s*\(\s*(?:pk|id)\s*=\s*{re.escape(tvar)}\b', f"IDOR - Django ORM filter with tainted variable '{tvar}'"),
-                    (rf'\.query\.get\s*\(\s*{re.escape(tvar)}\s*\)', f"IDOR - SQLAlchemy query.get() with tainted variable '{tvar}'"),
-                    (rf'\.query\.filter_by\s*\(\s*id\s*=\s*{re.escape(tvar)}\b', f"IDOR - SQLAlchemy filter_by with tainted variable '{tvar}'"),
-                ]
-                for sink_pat, vuln_name in orm_tainted_pats:
-                    if re.search(sink_pat, line):
-                        if i == tline:
-                            continue
-                        if has_auth_context and has_ownership:
-                            continue
-                        self._add_finding_simple(i, vuln_name,
-                                          VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                                          f"Variable '{tvar}' (from {tsource}, line {tline}) used in ORM lookup "
-                                          f"without authorization check. Verify the requesting user owns the resource.")
-
-            # ---- ORM lookup with route parameter as named argument ----
-            for rparam in current_func_route_params:
-                orm_route_pats = [
-                    (rf'\.objects\.get\s*\(\s*(?:pk|id)\s*=\s*{re.escape(rparam)}\b', f"IDOR - Django ORM lookup by route parameter '{rparam}'"),
-                    (rf'\.objects\.filter\s*\(\s*(?:pk|id)\s*=\s*{re.escape(rparam)}\b', f"IDOR - Django ORM filter by route parameter '{rparam}'"),
-                    (rf'\.query\.get\s*\(\s*{re.escape(rparam)}\s*\)', f"IDOR - SQLAlchemy query.get() by route parameter '{rparam}'"),
-                ]
-                for sink_pat, vuln_name in orm_route_pats:
-                    if re.search(sink_pat, line):
-                        if has_auth_context and has_ownership:
-                            continue
-                        self._add_finding_simple(i, vuln_name,
-                                          VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                                          f"Route parameter '{rparam}' used in ORM lookup without authorization check.")
-
-            # ---- Mass assignment patterns ----
-            for pattern, vuln_name in mass_assignment_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    if 'serializer.save()' in line:
-                        serializer_context = '\n'.join(self.source_lines[max(0, i - 20):i])
-                        if re.search(r'class\s+\w+Serializer.*Meta.*fields\s*=', serializer_context, re.DOTALL):
-                            continue
-                    self._add_finding_simple(i, vuln_name,
-                                      VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                                      "Raw request data passed directly to model operation. "
-                                      "An attacker could set privileged fields.")
-
-            # ---- Missing auth decorator on routes ----
-            for pattern, vuln_name in missing_auth_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    decorator_context = '\n'.join(self.source_lines[max(0, i - 4):i])
-                    has_auth_decorator = any(re.search(ap, decorator_context) for ap in auth_context_patterns[:12])
-                    if not has_auth_decorator:
-                        self._add_finding_simple(i, vuln_name,
-                                          VulnCategory.IDOR, Severity.MEDIUM, "MEDIUM",
-                                          "Route appears to lack authentication decorator (e.g., @login_required).")
-
-        # =====================================================================
-        # MFLAC: Missing Function Level Access Control (Python/Flask/Django)
-        # =====================================================================
-
-        # Auth-only decorators (confirm identity, NOT privilege)
-        py_auth_only_decorators = [
-            r'@login_required', r'@require_login', r'@authenticated',
-            r'@jwt_required', r'@token_required', r'@verify_token',
-            r'@ensure_logged_in', r'@require_auth',
-        ]
-
-        # Role/privilege decorators (confirm specific privilege level)
-        py_role_decorators = [
-            r'@admin_required', r'@require_admin', r'@staff_required',
-            r'@permission_required', r'@require_permission', r'@has_permission',
-            r'@user_passes_test', r'@require_role', r'@roles_required',
-            r'@has_role', r'@superuser_required', r'@group_required',
-        ]
-
-        # Privileged path indicators
-        py_admin_paths = [
-            r'/admin/', r'/api/admin/', r'/dashboard/admin',
-            r'/manage/', r'/management/', r'/internal/',
-            r'/superadmin/', r'/moderator/',
-            r'system.reset', r'system.config', r'reset.all',
-            r'delete.all', r'purge', r'wipe',
-            r'/users/delete', r'/users/ban', r'/users/suspend',
-            r'/config/', r'/settings/global', r'/roles/', r'/permissions/',
-        ]
-
-        for i, line in enumerate(self.source_lines, 1):
-            stripped = line.strip()
-            # Match Flask/FastAPI route decorators
-            route_match = re.search(r'@\w+\.route\s*\(\s*[\'"]([^\'"]+)[\'"]', stripped)
-            if not route_match:
-                route_match = re.search(r'@\w+\.(get|post|put|delete|patch)\s*\(\s*[\'"]([^\'"]+)[\'"]', stripped)
-                if route_match:
-                    route_path = route_match.group(2)
-                else:
-                    # Django path() patterns
-                    route_match = re.search(r'path\s*\(\s*[\'"]([^\'"]+)[\'"]', stripped)
-                    if route_match:
-                        route_path = route_match.group(1)
-                    else:
-                        continue
-                    route_path = route_match.group(1)
-            else:
-                route_path = route_match.group(1)
-
-            is_admin_path = any(re.search(pat, route_path, re.IGNORECASE) for pat in py_admin_paths)
-            if not is_admin_path:
-                continue
-
-            # Check decorators above AND below the route decorator (Flask stacks them)
-            # @app.route('/admin/...')  <- line i (route)
-            # @login_required           <- line i+1 (auth decorator below route)
-            # def handler():            <- line i+2
-            decorator_context_above = '\n'.join(self.source_lines[max(0, i - 6):i])
-            decorator_context_below = '\n'.join(self.source_lines[i:min(len(self.source_lines), i + 4)])
-            decorator_context = decorator_context_above + '\n' + decorator_context_below
-            has_auth_only = any(re.search(pat, decorator_context) for pat in py_auth_only_decorators)
-            has_role_check = any(re.search(pat, decorator_context) for pat in py_role_decorators)
-
-            # Also check handler body for inline role checks
-            handler_end = min(len(self.source_lines), i + 12)
-            handler_body = '\n'.join(self.source_lines[i-1:handler_end])
-            has_inline_role = re.search(
-                r'\.is_superuser|\.is_staff|\.is_admin|\.role\s*[!=]=|'
-                r'has_perm\(|check_permission|user\.groups\.|'
-                r'request\.user\.role|current_user\.role|'
-                r'abort\s*\(\s*403\s*\).*role|role.*abort\s*\(\s*403\s*\)|'
-                r'\[.role.\]\s*[!=]=|\.get\s*\(\s*[\'"]role[\'"]\s*\)\s*[!=]=',
-                handler_body, re.IGNORECASE
-            )
-
-            if has_auth_only and not has_role_check and not has_inline_role:
-                methods_match = re.search(r'methods\s*=\s*\[([^\]]+)\]', stripped)
-                is_mutating = False
-                if methods_match:
-                    methods_str = methods_match.group(1).upper()
-                    is_mutating = any(m in methods_str for m in ['POST', 'PUT', 'DELETE', 'PATCH'])
-                elif re.search(r'\.(post|put|delete|patch)\s*\(', stripped):
-                    is_mutating = True
-
-                sev = Severity.HIGH if is_mutating else Severity.MEDIUM
-                self._add_finding_simple(
-                    i,
-                    "MFLAC - Admin route with auth-only decorator",
-                    VulnCategory.IDOR, sev, "HIGH",
-                    f"Route '{route_path}' uses an authentication decorator (e.g., @login_required) "
-                    f"but lacks a role/permission check (e.g., @admin_required). Any logged-in user "
-                    f"can access this privileged endpoint."
-                )
-            # No auth at all on an admin/privileged route
-            elif not has_auth_only and not has_role_check and not has_inline_role:
-                # Verify there's truly no decorator at all (only @app.route)
-                has_any_decorator = re.search(
-                    r'@(?!app\.|api\.|router\.|blueprint\.)\w+',
-                    decorator_context
-                )
-                if not has_any_decorator:
-                    self._add_finding_simple(
-                        i,
-                        "MFLAC - Admin route without any auth decorator",
-                        VulnCategory.IDOR, Severity.CRITICAL, "HIGH",
-                        f"Route '{route_path}' is a privileged/admin endpoint with NO authentication "
-                        f"or authorization decorator. Any anonymous user can call it."
-                    )
-
     def _add_finding_simple(self, line_num: int, vuln_name: str, category: VulnCategory,
                             severity: Severity, confidence: str, description: str = ""):
         """Add a finding (simplified version for regex-based post-AST checks)."""
@@ -2693,7 +2291,6 @@ class JavaScriptAnalyzer:
         self._check_xxe()
         self._check_xpath_injection()
         self._check_auth_bypass()
-        self._check_idor()
         self._check_react_security()
         # 2nd-order detection
         self._check_second_order_nosql()
@@ -4284,262 +3881,6 @@ class JavaScriptAnalyzer:
                                       f"Shell command template uses value from {source}.")
 
 
-    def _check_idor(self):
-        """Check for Insecure Direct Object Reference / Broken Access Control vulnerabilities."""
-
-        # Patterns that indicate user-supplied identifiers from request
-        user_input_id_patterns = [
-            r'req\.params\.(\w+)',
-            r'req\.query\.(\w+)',
-            r'req\.body\.(\w+)',
-            r'request\.params\.(\w+)',
-            r'request\.query\.(\w+)',
-            r'request\.body\.(\w+)',
-            r'ctx\.params\.(\w+)',
-            r'ctx\.query\.(\w+)',
-            r'ctx\.request\.body\.(\w+)',
-        ]
-
-        # Direct object lookups that are dangerous when fed raw user input
-        direct_lookup_patterns = [
-            (r'\.findById\s*\(\s*(?:req|request|ctx)\.(?:params|query|body)\b', "IDOR - Direct object lookup by user-supplied ID"),
-            (r'\.findOne\s*\(\s*\{\s*_?id\s*:\s*(?:req|request|ctx)\.(?:params|query|body)\b', "IDOR - Direct object lookup by user-supplied ID"),
-            (r'\.findByPk\s*\(\s*(?:req|request|ctx)\.(?:params|query|body)\b', "IDOR - Direct object lookup by user-supplied ID (Sequelize)"),
-            (r'\.deleteOne\s*\(\s*\{\s*_?id\s*:\s*(?:req|request|ctx)\.(?:params|query|body)\b', "IDOR - Direct object deletion by user-supplied ID"),
-            (r'\.deleteMany\s*\(\s*\{\s*_?id\s*:\s*(?:req|request|ctx)\.(?:params|query|body)\b', "IDOR - Direct bulk deletion by user-supplied ID"),
-            (r'\.findByIdAndDelete\s*\(\s*(?:req|request|ctx)\.(?:params|query|body)\b', "IDOR - Direct object deletion by user-supplied ID"),
-            (r'\.findByIdAndUpdate\s*\(\s*(?:req|request|ctx)\.(?:params|query|body)\b', "IDOR - Direct object update by user-supplied ID"),
-            (r'\.findByIdAndRemove\s*\(\s*(?:req|request|ctx)\.(?:params|query|body)\b', "IDOR - Direct object removal by user-supplied ID"),
-            (r'\.findOneAndUpdate\s*\(\s*\{\s*_?id\s*:\s*(?:req|request|ctx)\.(?:params|query|body)\b', "IDOR - Direct object update by user-supplied ID"),
-            (r'\.findOneAndDelete\s*\(\s*\{\s*_?id\s*:\s*(?:req|request|ctx)\.(?:params|query|body)\b', "IDOR - Direct object deletion by user-supplied ID"),
-            (r'\.updateOne\s*\(\s*\{\s*_?id\s*:\s*(?:req|request|ctx)\.(?:params|query|body)\b', "IDOR - Direct object update by user-supplied ID"),
-        ]
-
-        # Mass assignment patterns
-        mass_assignment_patterns = [
-            (r'\.create\s*\(\s*(?:req|request|ctx)\.body\s*\)', "IDOR - Mass assignment via raw request body in create"),
-            (r'\.update\s*\(\s*(?:req|request|ctx)\.body\s*\)', "IDOR - Mass assignment via raw request body in update"),
-            (r'\.insertMany\s*\(\s*(?:req|request|ctx)\.body\s*\)', "IDOR - Mass assignment via raw request body in bulk insert"),
-            (r'new\s+\w+\s*\(\s*(?:req|request|ctx)\.body\s*\)', "IDOR - Mass assignment via raw request body in constructor"),
-            (r'Object\.assign\s*\(\s*\w+\s*,\s*(?:req|request|ctx)\.body\s*\)', "IDOR - Mass assignment via Object.assign with request body"),
-            (r'\{\s*\.\.\.(?:req|request|ctx)\.body\s*\}', "IDOR - Mass assignment via spread of request body"),
-        ]
-
-        # Patterns indicating authorization checks in surrounding context
-        auth_context_patterns = [
-            r'req\.user', r'request\.user', r'ctx\.state\.user', r'ctx\.user',
-            r'currentUser', r'current_user', r'session\.user',
-            r'isOwner', r'is_owner', r'checkOwnership', r'verifyOwner',
-            r'authorize', r'isAuthorized', r'hasPermission', r'checkPermission',
-            r'requireRole', r'hasRole', r'checkRole', r'isAdmin', r'requireAdmin',
-            r'\.where\s*\(\s*[\'"]?user', r'user_id\s*:', r'userId\s*:',
-            r'owner\s*:', r'createdBy\s*:', r'belongsTo',
-        ]
-
-        # Missing auth middleware on destructive routes
-        route_no_auth_patterns = [
-            (r'(?:router|app)\.(?:delete|put|patch)\s*\(\s*[\'"]\/[^\'"]*\/:?\w*[\'"]?\s*,\s*(?:async\s+)?(?:function|\()', "IDOR - Destructive route without auth middleware"),
-        ]
-
-        for i, line in enumerate(self.source_lines, 1):
-            stripped = line.strip()
-            if stripped.startswith('//') or stripped.startswith('/*'):
-                continue
-
-            # Get context (surrounding lines) for auth check
-            context_start = max(0, i - 6)
-            context_end = min(len(self.source_lines), i + 6)
-            context = '\n'.join(self.source_lines[context_start:context_end])
-
-            has_auth_context = any(re.search(pat, context, re.IGNORECASE) for pat in auth_context_patterns)
-
-            # Check direct object lookup patterns
-            for pattern, vuln_name in direct_lookup_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    if has_auth_context:
-                        continue
-                    self._add_finding(i, vuln_name,
-                                      VulnCategory.IDOR, Severity.HIGH, "MEDIUM",
-                                      "Database lookup uses user-supplied ID without authorization check. "
-                                      "Verify that the requesting user owns or has access to the resource.")
-
-            # Check mass assignment patterns
-            for pattern, vuln_name in mass_assignment_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    self._add_finding(i, vuln_name,
-                                      VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                                      "Raw request body passed directly to database operation. "
-                                      "An attacker could set fields like 'role', 'isAdmin', or 'price'.")
-
-            # Check destructive routes without auth middleware
-            for pattern, vuln_name in route_no_auth_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    # Check if auth middleware is in the route definition (same line or preceding lines)
-                    route_context_start = max(0, i - 3)
-                    route_context = '\n'.join(self.source_lines[route_context_start:i])
-                    auth_middleware_patterns = [
-                        r'auth', r'authenticate', r'isAuthenticated', r'requireAuth',
-                        r'ensureAuth', r'protect', r'verifyToken', r'passport\.',
-                        r'jwt', r'isLoggedIn', r'requireLogin', r'checkAuth',
-                        r'middleware.*auth', r'guard',
-                    ]
-                    has_auth_middleware = any(re.search(mp, route_context + '\n' + line, re.IGNORECASE) for mp in auth_middleware_patterns)
-                    if not has_auth_middleware:
-                        self._add_finding(i, vuln_name,
-                                          VulnCategory.IDOR, Severity.MEDIUM, "MEDIUM",
-                                          "Destructive route (DELETE/PUT/PATCH) appears to lack authentication middleware.")
-
-            # Indirect IDOR: variable assigned from req.params then used in DB lookup or data access
-            for input_pat in user_input_id_patterns:
-                match = re.search(rf'(?:const|let|var)\s+(\w+)\s*=\s*{input_pat}', line)
-                # Also match destructuring: const { userId } = req.params
-                if not match:
-                    destr_match = re.search(
-                        rf'(?:const|let|var)\s+\{{\s*(\w+)\s*\}}\s*=\s*(?:req|request|ctx)\.(?:params|query|body)',
-                        line
-                    )
-                    if destr_match:
-                        match = destr_match
-                if match:
-                    var_name = match.group(1)
-                    # Scan forward for DB lookup or destructive operation using this variable
-                    for j in range(i, min(len(self.source_lines), i + 20)):
-                        fwd_line = self.source_lines[j]
-                        indirect_lookup_pats = [
-                            rf'\.findById\s*\(\s*{re.escape(var_name)}\s*\)',
-                            rf'\.findByPk\s*\(\s*{re.escape(var_name)}\s*\)',
-                            rf'\.findOne\s*\(\s*\{{\s*_?id\s*:\s*{re.escape(var_name)}\s*\}}',
-                            rf'\.deleteOne\s*\(\s*\{{\s*_?id\s*:\s*{re.escape(var_name)}\s*\}}',
-                            rf'\.findByIdAndDelete\s*\(\s*{re.escape(var_name)}\s*\)',
-                            rf'\.findByIdAndUpdate\s*\(\s*{re.escape(var_name)}\s*[,)]',
-                            rf'\.remove\s*\(\s*\{{\s*_?id\s*:\s*{re.escape(var_name)}\s*\}}',
-                            rf'\.destroy\s*\(\s*\{{\s*(?:where\s*:\s*\{{\s*)?_?id\s*:\s*{re.escape(var_name)}',
-                            # Bracket access: object[variable] — dict/array lookup by user ID
-                            rf'\w+\s*\[\s*{re.escape(var_name)}\s*\]',
-                        ]
-                        for ilp in indirect_lookup_pats:
-                            if re.search(ilp, fwd_line):
-                                fwd_context_start = max(0, j - 5)
-                                fwd_context_end = min(len(self.source_lines), j + 5)
-                                fwd_context = '\n'.join(self.source_lines[fwd_context_start:fwd_context_end])
-                                has_fwd_auth = any(re.search(ap, fwd_context, re.IGNORECASE) for ap in auth_context_patterns)
-                                if not has_fwd_auth:
-                                    self._add_finding(j + 1, "IDOR - Indirect object lookup by user-supplied ID",
-                                                      VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                                                      f"Variable '{var_name}' from request input used in DB lookup without authorization check.")
-
-        # =====================================================================
-        # MFLAC: Missing Function Level Access Control
-        # Detect admin/privileged routes guarded by auth-only middleware
-        # (e.g., isLoggedIn) instead of role-based middleware (e.g., isAdmin).
-        # =====================================================================
-
-        # Auth-only middleware: confirms identity but NOT privilege level
-        auth_only_middleware = [
-            r'isLoggedIn', r'isAuthenticated', r'requireAuth', r'ensureAuth',
-            r'verifyToken', r'checkAuth', r'requireLogin', r'authenticate',
-            r'passport\.authenticate', r'ensureLoggedIn', r'loginRequired',
-            r'authMiddleware', r'tokenAuth', r'jwtAuth', r'requireSession',
-        ]
-
-        # Role/privilege middleware: confirms the user has specific privileges
-        role_middleware = [
-            r'isAdmin', r'requireAdmin', r'adminOnly', r'ensureAdmin',
-            r'requireRole', r'hasRole', r'checkRole', r'authorizeRole',
-            r'isAuthorized', r'checkPermission', r'hasPermission', r'requirePermission',
-            r'authorize', r'\.can\s*\(', r'ability', r'policy', r'rbac',
-            r'isSuperAdmin', r'isModerator', r'requirePrivilege',
-            r'\.role\s*[!=]==?\s*[\'"]', r'\.role\s*\)', r'\.roles\b',
-            r'req\.user\.role\b', r'request\.user\.role\b',
-        ]
-
-        # Privileged route path indicators
-        admin_path_patterns = [
-            r'/admin/', r'/api/admin/', r'/dashboard/admin',
-            r'/manage/', r'/management/', r'/internal/',
-            r'/superadmin/', r'/moderator/',
-            r'system-reset', r'system-config', r'reset-all',
-            r'delete-all', r'purge', r'wipe',
-            r'/users/delete', r'/users/ban', r'/users/suspend',
-            r'/config/', r'/settings/global',
-            r'/roles/', r'/permissions/',
-        ]
-
-        for i, line in enumerate(self.source_lines, 1):
-            stripped = line.strip()
-            if stripped.startswith('//') or stripped.startswith('/*'):
-                continue
-
-            # Match Express/Koa route definitions
-            route_match = re.search(
-                r'(?:router|app)\.(get|post|put|delete|patch|all)\s*\(\s*[\'"]([^\'"]+)[\'"]',
-                line, re.IGNORECASE
-            )
-            if not route_match:
-                continue
-
-            http_method = route_match.group(1).lower()
-            route_path = route_match.group(2).lower()
-
-            # Check if route path looks privileged/admin
-            is_admin_path = any(re.search(pat, route_path, re.IGNORECASE) for pat in admin_path_patterns)
-            if not is_admin_path:
-                continue
-
-            # Get the full route definition (may span multiple lines)
-            route_line_content = line
-            # Check up to 3 lines forward for multi-line route definitions
-            for k in range(i, min(len(self.source_lines), i + 3)):
-                route_line_content += ' ' + self.source_lines[k]
-
-            # Check for auth-only middleware
-            has_auth_only = any(
-                re.search(rf'\b{pat}\b', route_line_content, re.IGNORECASE)
-                for pat in auth_only_middleware
-            )
-
-            # Check for role/privilege middleware
-            has_role_check = any(
-                re.search(rf'\b{pat}\b', route_line_content, re.IGNORECASE)
-                for pat in role_middleware
-            )
-
-            # Also check a few lines ahead for role checks inside the handler
-            handler_context_end = min(len(self.source_lines), i + 10)
-            handler_context = '\n'.join(self.source_lines[i-1:handler_context_end])
-            has_role_in_handler = any(
-                re.search(rf'\b{pat}\b', handler_context, re.IGNORECASE)
-                for pat in role_middleware
-            )
-
-            # MFLAC: has auth but NO role check on an admin route
-            if has_auth_only and not has_role_check and not has_role_in_handler:
-                sev = Severity.HIGH if http_method in ('post', 'put', 'delete', 'patch') else Severity.MEDIUM
-                self._add_finding(
-                    i,
-                    "MFLAC - Admin route protected by auth-only middleware",
-                    VulnCategory.IDOR, sev, "HIGH",
-                    f"Route '{route_match.group(2)}' uses authentication middleware (e.g., isLoggedIn) "
-                    f"but lacks role-based authorization (e.g., isAdmin). Any authenticated user "
-                    f"can access this privileged endpoint."
-                )
-            # No middleware at all on an admin route
-            elif not has_auth_only and not has_role_check and not has_role_in_handler:
-                # Check if there's NO middleware at all (just path + handler)
-                no_middleware = re.search(
-                    r'(?:router|app)\.\w+\s*\(\s*[\'"][^\'"]+[\'"]\s*,\s*(?:async\s+)?(?:function|\()',
-                    line, re.IGNORECASE
-                )
-                if no_middleware:
-                    self._add_finding(
-                        i,
-                        "MFLAC - Admin route without any auth middleware",
-                        VulnCategory.IDOR, Severity.CRITICAL, "HIGH",
-                        f"Route '{route_match.group(2)}' is an administrative endpoint with NO "
-                        f"authentication or authorization middleware. Any anonymous user can call it."
-                    )
-
-
 class JavaAnalyzer:
     """
     Java analyzer using regex-enhanced pattern matching with taint tracking.
@@ -4921,7 +4262,6 @@ class JavaAnalyzer:
         self._check_table_name_injection()
         # 2nd-order XPath injection detection
         self._check_xpath_injection()
-        self._check_idor()
         return self.findings
 
     def _add_finding(self, line_num: int, vuln_name: str, category: VulnCategory,
@@ -6150,463 +5490,6 @@ class JavaAnalyzer:
                             f"Entity value from {source} formatted into SQL via MessageFormat."
                         )
 
-    def _check_idor(self):
-        """Check for Insecure Direct Object Reference / Broken Access Control vulnerabilities in Java."""
-
-        # Direct object lookup patterns using Spring/JPA
-        direct_lookup_patterns = [
-            (r'repository\.findById\s*\(\s*(\w+)\s*\)', "IDOR - Direct repository lookup by user-supplied ID"),
-            (r'repository\.getById\s*\(\s*(\w+)\s*\)', "IDOR - Direct repository lookup by user-supplied ID"),
-            (r'repository\.getReferenceById\s*\(\s*(\w+)\s*\)', "IDOR - Direct repository lookup by user-supplied ID"),
-            (r'repository\.getOne\s*\(\s*(\w+)\s*\)', "IDOR - Direct repository lookup by user-supplied ID"),
-            (r'\.findById\s*\(\s*(\w+)\s*\)', "IDOR - Direct entity lookup by ID"),
-            (r'\w+\.find\s*\(\s*\w+\.class\s*,\s*(\w+)\s*\)', "IDOR - Direct EntityManager lookup by user-supplied ID"),
-            (r'session\.get\s*\(\s*\w+\.class\s*,\s*(\w+)\s*\)', "IDOR - Direct Hibernate session lookup by user-supplied ID"),
-            # Generic collection/map lookup: map.get(id), list.get(index)
-            (r'\w+\.get\s*\(\s*(\w+)\s*\)', "IDOR - Direct data lookup by user-supplied ID"),
-        ]
-
-        # Mass assignment patterns
-        mass_assignment_patterns = [
-            (r'@RequestBody\s+\w+\s+(\w+).*\bsave\s*\(\s*\1\s*\)', "IDOR - Mass assignment via @RequestBody directly saved"),
-            (r'BeanUtils\.copyProperties\s*\(\s*\w+\s*,\s*\w+\s*\)', "IDOR - Mass assignment via BeanUtils.copyProperties"),
-        ]
-
-        # Missing auth annotation patterns on destructive endpoints
-        missing_auth_patterns = [
-            (r'@(?:DeleteMapping|PutMapping|PatchMapping)\s*\(\s*["\'].*\{id\}', "IDOR - Destructive endpoint with path variable"),
-        ]
-
-        # User input source patterns (Spring)
-        user_input_patterns = [
-            r'@PathVariable',
-            r'@RequestParam',
-            r'@RequestBody',
-            r'request\.getParameter\s*\(',
-            r'httpServletRequest\.getParameter',
-        ]
-
-        # Authorization context patterns
-        auth_context_patterns = [
-            r'@PreAuthorize', r'@Secured', r'@RolesAllowed',
-            r'SecurityContextHolder', r'Principal\s+\w+', r'Authentication\s+\w+',
-            r'\.getAuthentication\(\)', r'getUserId\(\)', r'currentUser',
-            r'@WithMockUser', r'hasAuthority', r'hasRole',
-            r'getUser\(\)', r'getPrincipal\(\)',
-            r'\.getOwnerId\(\)', r'\.getUserId\(\)',
-            r'belongsToUser', r'isOwner', r'checkOwnership',
-        ]
-
-        for i, line in enumerate(self.source_lines, 1):
-            stripped = line.strip()
-            if stripped.startswith('//') or stripped.startswith('/*'):
-                continue
-
-            context_start = max(0, i - 8)
-            context_end = min(len(self.source_lines), i + 5)
-            # Exclude comment lines from context — comments describing vulnerabilities
-            # (e.g. "// no check for getOwnerId()") should not count as auth checks
-            context_lines = [l for l in self.source_lines[context_start:context_end]
-                             if not l.strip().startswith('//') and not l.strip().startswith('/*') and not l.strip().startswith('*')]
-            context = '\n'.join(context_lines)
-
-            has_auth_context = any(re.search(pat, context, re.IGNORECASE) for pat in auth_context_patterns)
-
-            # Check direct object lookup with tainted input
-            for pattern, vuln_name in direct_lookup_patterns:
-                match = re.search(pattern, line)
-                if match:
-                    var_name = match.group(1)
-                    # Check if var comes from user input
-                    is_user_input = var_name in self.tainted_vars
-                    if not is_user_input:
-                        # Check if the variable is sourced from annotations in nearby lines
-                        param_context = '\n'.join(self.source_lines[max(0, i - 15):i])
-                        for uip in user_input_patterns:
-                            if re.search(rf'{uip}.*\b{re.escape(var_name)}\b', param_context, re.DOTALL):
-                                is_user_input = True
-                                break
-
-                    if is_user_input and not has_auth_context:
-                        self._add_finding(i, vuln_name,
-                                          VulnCategory.IDOR, Severity.HIGH, "HIGH", var_name,
-                                          "Database lookup uses user-supplied ID without authorization check. "
-                                          "Verify the requesting user owns or has access to the resource.")
-
-            # Check mass assignment: @RequestBody entity directly saved
-            for j in range(max(0, i - 3), min(len(self.source_lines), i + 1)):
-                curr_line = self.source_lines[j]
-                if re.search(r'@RequestBody', curr_line):
-                    # Look for save/persist in the next lines
-                    for k in range(j, min(len(self.source_lines), j + 10)):
-                        save_line = self.source_lines[k]
-                        if re.search(r'\.save\s*\(|\.persist\s*\(|\.merge\s*\(|\.saveAndFlush\s*\(', save_line):
-                            param_match = re.search(r'@RequestBody\s+\w+\s+(\w+)', curr_line)
-                            if param_match:
-                                param_name = param_match.group(1)
-                                if re.search(rf'\b{re.escape(param_name)}\b', save_line):
-                                    fwd_context = '\n'.join(self.source_lines[j:k + 3])
-                                    has_field_filter = re.search(r'set\w+\(|\.set[A-Z]|copyProperties|ModelMapper', fwd_context)
-                                    # Check for security annotations in method/class context
-                                    method_auth_context = '\n'.join(self.source_lines[max(0, j - 10):j + 1])
-                                    has_security = any(re.search(ap, method_auth_context) for ap in auth_context_patterns[:6])
-                                    if not has_field_filter and not has_security:
-                                        self._add_finding(k + 1, "IDOR - Mass assignment via @RequestBody directly saved",
-                                                          VulnCategory.IDOR, Severity.HIGH, "HIGH", param_name,
-                                                          "Entity from @RequestBody is saved directly without field filtering. "
-                                                          "An attacker could set privileged fields like 'role' or 'isAdmin'.")
-                            break  # Only report once per @RequestBody block
-
-            # Check destructive endpoints with path variable but no auth annotation
-            for pattern, vuln_name in missing_auth_patterns:
-                if re.search(pattern, line):
-                    # Check for auth annotations in the method context (up to 10 lines back for class/method annotations)
-                    method_context = '\n'.join(self.source_lines[max(0, i - 10):i])
-                    has_auth_annotation = any(re.search(ap, method_context) for ap in auth_context_patterns[:6])
-                    if not has_auth_annotation:
-                        self._add_finding(i, vuln_name,
-                                          VulnCategory.IDOR, Severity.MEDIUM, "MEDIUM",
-                                          description="Destructive endpoint uses path variable without security annotation. "
-                                          "Consider adding @PreAuthorize or ownership verification.")
-
-        # =====================================================================
-        # MFLAC: Missing Function Level Access Control (Java/Spring)
-        # Uses javalang AST to properly resolve class-level @RequestMapping
-        # prefixes combined with method-level mapping paths.
-        # =====================================================================
-
-        # Admin path indicators
-        java_admin_path_patterns = [
-            r'/admin/', r'/api/admin/', r'/management/', r'/internal/',
-            r'/superadmin/', r'/moderator/',
-            r'system-reset', r'system-config', r'reset-all',
-            r'delete-all', r'purge', r'wipe',
-            r'/users/delete', r'/users/ban',
-            r'/config/', r'/settings/global', r'/roles/', r'/permissions/',
-        ]
-
-        mapping_annotation_names = {
-            'RequestMapping', 'GetMapping', 'PostMapping',
-            'PutMapping', 'DeleteMapping', 'PatchMapping',
-        }
-        mutating_mappings = {'PostMapping', 'PutMapping', 'DeleteMapping', 'PatchMapping'}
-
-        # Auth-only annotation values (confirm identity, NOT privilege)
-        auth_only_values = [
-            r'isAuthenticated\(\)',
-            r'ROLE_USER',
-            r'^USER$',
-            r'hasRole\s*\(\s*[\'"]?USER[\'"]?\s*\)',
-            r'hasAuthority\s*\(\s*[\'"]?USER[\'"]?\s*\)',
-        ]
-        # Role/privilege annotation values (confirm specific privilege)
-        role_check_values = [
-            r'hasRole\s*\(\s*[\'"]?ADMIN', r'hasAuthority\s*\(\s*[\'"]?ADMIN',
-            r'ROLE_ADMIN', r'^ADMIN$', r'hasRole\s*\(\s*[\'"]?SUPER',
-            r'hasAnyRole.*ADMIN',
-        ]
-        role_check_annotation_names = {'IsAdmin', 'AdminOnly', 'RequireAdmin'}
-
-        def _extract_annotation_path(ann):
-            """Extract the path string from a Spring mapping annotation element."""
-            if ann.element is None:
-                return ""
-            if isinstance(ann.element, javalang.tree.Literal):
-                return ann.element.value.strip('"').strip("'")
-            if isinstance(ann.element, list):
-                for pair in ann.element:
-                    if hasattr(pair, 'name') and pair.name == 'value':
-                        if isinstance(pair.value, javalang.tree.Literal):
-                            return pair.value.value.strip('"').strip("'")
-            return ""
-
-        def _get_annotation_str_value(ann):
-            """Get the string value from an annotation element."""
-            if ann.element is None:
-                return ""
-            if isinstance(ann.element, javalang.tree.Literal):
-                return ann.element.value.strip('"').strip("'")
-            if isinstance(ann.element, javalang.tree.ElementArrayValue):
-                vals = []
-                for v in ann.element.values:
-                    if isinstance(v, javalang.tree.Literal):
-                        vals.append(v.value.strip('"').strip("'"))
-                return ' '.join(vals)
-            if isinstance(ann.element, list):
-                for pair in ann.element:
-                    if hasattr(pair, 'name') and pair.name == 'value':
-                        if isinstance(pair.value, javalang.tree.Literal):
-                            return pair.value.value.strip('"').strip("'")
-            return ""
-
-        def _classify_security_annotation(ann):
-            """Classify a method annotation as auth-only, role-check, or none."""
-            name = ann.name
-            if name in role_check_annotation_names:
-                return 'role'
-            if name in ('PreAuthorize', 'Secured', 'RolesAllowed'):
-                val = _get_annotation_str_value(ann)
-                if any(re.search(pat, val) for pat in role_check_values):
-                    return 'role'
-                if any(re.search(pat, val) for pat in auth_only_values):
-                    return 'auth_only'
-                if val:
-                    return 'security_other'
-            if name in ('DenyAll', 'PermitAll'):
-                return 'security_other'
-            return None
-
-        try:
-            tree = javalang.parse.parse(self.source_code)
-        except javalang.parser.JavaSyntaxError:
-            tree = None
-
-        if tree:
-            for _, class_node in tree.filter(javalang.tree.ClassDeclaration):
-                # Extract class-level @RequestMapping path prefix
-                class_prefix = ""
-                for ann in (class_node.annotations or []):
-                    if ann.name == 'RequestMapping':
-                        class_prefix = _extract_annotation_path(ann)
-
-                # Check class-level security annotations
-                class_security = None
-                for ann in (class_node.annotations or []):
-                    result = _classify_security_annotation(ann)
-                    if result == 'role':
-                        class_security = 'role'
-                        break
-                    elif result == 'auth_only':
-                        class_security = 'auth_only'
-                    elif result == 'security_other' and class_security is None:
-                        class_security = 'security_other'
-
-                methods_list = list(class_node.methods or [])
-                for m_idx, method in enumerate(methods_list):
-                    if not method.annotations:
-                        continue
-
-                    # Find method-level mapping annotation
-                    method_mapping = None
-                    method_path = ""
-                    for ann in method.annotations:
-                        if ann.name in mapping_annotation_names:
-                            method_mapping = ann.name
-                            method_path = _extract_annotation_path(ann)
-                            break
-
-                    if not method_mapping:
-                        continue
-
-                    # Combine class prefix + method path
-                    full_path = class_prefix.rstrip('/') + '/' + method_path.lstrip('/')
-                    if not full_path.endswith('/'):
-                        full_path += '/'
-
-                    is_admin_path = any(re.search(pat, full_path, re.IGNORECASE)
-                                        for pat in java_admin_path_patterns)
-
-                    # Classify method-level security annotations
-                    method_security = None
-                    for ann in method.annotations:
-                        result = _classify_security_annotation(ann)
-                        if result == 'role':
-                            method_security = 'role'
-                            break
-                        elif result == 'auth_only':
-                            method_security = 'auth_only'
-                        elif result == 'security_other' and method_security is None:
-                            method_security = 'security_other'
-
-                    # Effective security = method-level overrides class-level
-                    effective = method_security or class_security
-
-                    # Check handler body for inline role checks
-                    # Use brace-depth counting to find method body boundaries
-                    line_num = method.position.line if method.position else 0
-                    if line_num > 0:
-                        # Find the method body by tracking braces from method signature
-                        brace_depth = 0
-                        body_start = line_num - 1
-                        body_end = min(len(self.source_lines), line_num + 30)
-                        found_open = False
-                        for b_idx in range(body_start, body_end):
-                            for ch in self.source_lines[b_idx]:
-                                if ch == '{':
-                                    brace_depth += 1
-                                    found_open = True
-                                elif ch == '}':
-                                    brace_depth -= 1
-                                    if found_open and brace_depth == 0:
-                                        body_end = b_idx + 1
-                                        break
-                            if found_open and brace_depth == 0:
-                                break
-                        handler_body = '\n'.join(self.source_lines[body_start:body_end])
-                        # Check for inline role VERIFICATION (not role manipulation/assignment)
-                        has_inline_role = re.search(
-                            r'(?:if|throw|assert|switch|case|require|check|verify|ensure|guard).*'
-                            r'(?:hasRole|hasAuthority|isAdmin|getRole\(\)|\.getRoles\(\)|'
-                            r'ROLE_ADMIN|SecurityContext.*admin)',
-                            handler_body, re.IGNORECASE
-                        )
-                        if has_inline_role:
-                            continue
-
-                    is_mutating = method_mapping in mutating_mappings
-
-                    # Find the line number of the mapping annotation for reporting
-                    report_line = line_num
-                    if report_line > 0:
-                        for search_line in range(max(0, report_line - 5), report_line):
-                            if re.search(rf'@{method_mapping}', self.source_lines[search_line]):
-                                report_line = search_line + 1
-                                break
-
-                    if is_admin_path:
-                        if effective == 'auth_only':
-                            sev = Severity.HIGH if is_mutating else Severity.MEDIUM
-                            self._add_finding(
-                                report_line,
-                                "MFLAC - Admin endpoint with auth-only annotation",
-                                VulnCategory.IDOR, sev, "HIGH",
-                                description=f"Endpoint '{full_path.rstrip('/')}' uses authentication-only annotation "
-                                f"but lacks admin-level authorization. Any authenticated user can call this admin function."
-                            )
-                            continue
-                        elif effective is None:
-                            sev = Severity.CRITICAL if is_mutating else Severity.HIGH
-                            self._add_finding(
-                                report_line,
-                                "MFLAC - Admin endpoint without any security annotation",
-                                VulnCategory.IDOR, sev, "HIGH",
-                                description=f"Endpoint '{full_path.rstrip('/')}' is an admin/privileged endpoint with NO "
-                                f"security annotation (@PreAuthorize, @Secured). Any user can call it."
-                            )
-                            continue
-
-                    # Second MFLAC pattern: privilege-escalation sinks with auth-only protection
-                    # Detects role/permission manipulation in method bodies that lack admin-level auth
-                    if effective in ('auth_only', None) and is_mutating:
-                        priv_esc_sinks = re.search(
-                            r'updateRole|setRole|assignRole|promoteToAdmin|promote|'
-                            r'addRole|removeRole|grantRole|revokeRole|'
-                            r'ROLE_ADMIN|ROLE_SUPER|setAdmin|makeAdmin|'
-                            r'setPermission|grantPermission|addPermission|'
-                            r'\.setAuthorities|\.grantedAuthority|'
-                            r'deleteUser|banUser|suspendUser|disableUser|'
-                            r'resetPassword|forceLogout|impersonate',
-                            handler_body, re.IGNORECASE
-                        )
-                        if priv_esc_sinks:
-                            sev = Severity.CRITICAL if effective is None else Severity.HIGH
-                            self._add_finding(
-                                report_line,
-                                "MFLAC - Privilege escalation sink with insufficient authorization",
-                                VulnCategory.IDOR, sev, "HIGH",
-                                description=f"Endpoint '{full_path.rstrip('/')}' performs privilege-sensitive operations "
-                                f"({priv_esc_sinks.group()}) but only has "
-                                f"{'no security annotation' if effective is None else 'basic authentication (not admin-level)'}. "
-                                f"Any {'user' if effective is None else 'authenticated user'} could escalate privileges."
-                            )
-
-            # =================================================================
-            # MFLAC: @Service/@Component class-level annotation inheritance
-            # In misconfigured Spring Security (e.g. wrong ProxyMode, or
-            # @EnableMethodSecurity not set), class-level @PreAuthorize may
-            # NOT be inherited by all public methods. Warn when a @Service
-            # class relies solely on class-level security with public methods
-            # that perform destructive operations.
-            # =================================================================
-            if tree:
-                service_stereotypes = {'Service', 'Component', 'Bean', 'Repository'}
-                destructive_method_patterns = re.compile(
-                    r'deleteAll|removeAll|truncate|dropTable|purge|wipe|'
-                    r'deleteBy|removeBy|destroyAll|clearAll|resetAll|'
-                    r'\.deleteAll\b|\.removeAll\b|\.truncate\b|\.drop\b',
-                    re.IGNORECASE
-                )
-
-                for _, class_node in tree.filter(javalang.tree.ClassDeclaration):
-                    class_ann_names = {a.name for a in (class_node.annotations or [])}
-
-                    # Only target @Service/@Component classes (not @RestController)
-                    is_service = bool(class_ann_names & service_stereotypes)
-                    is_controller = bool(class_ann_names & {'RestController', 'Controller'})
-                    if not is_service or is_controller:
-                        continue
-
-                    # Check if class has role-level security annotation
-                    class_has_role = False
-                    for ann in (class_node.annotations or []):
-                        result = _classify_security_annotation(ann)
-                        if result == 'role':
-                            class_has_role = True
-                            break
-
-                    if not class_has_role:
-                        continue
-
-                    # Check each public method without its own @PreAuthorize
-                    for method in (class_node.methods or []):
-                        if 'public' not in (method.modifiers or set()):
-                            continue
-
-                        method_ann_names = {a.name for a in (method.annotations or [])}
-                        has_own_security = bool(
-                            method_ann_names & {'PreAuthorize', 'Secured', 'RolesAllowed',
-                                                'DenyAll', 'PermitAll'}
-                        )
-                        if has_own_security:
-                            continue
-
-                        # Check if method body contains destructive operations
-                        line_num = method.position.line if method.position else 0
-                        if line_num <= 0:
-                            continue
-
-                        brace_depth = 0
-                        body_start = line_num - 1
-                        body_end = min(len(self.source_lines), line_num + 30)
-                        found_open = False
-                        for b_idx in range(body_start, body_end):
-                            in_str = False
-                            str_ch = None
-                            for ch in self.source_lines[b_idx]:
-                                if in_str:
-                                    if ch == str_ch:
-                                        in_str = False
-                                    continue
-                                if ch in ('"', "'"):
-                                    in_str = True
-                                    str_ch = ch
-                                    continue
-                                if ch == '{':
-                                    brace_depth += 1
-                                    found_open = True
-                                elif ch == '}':
-                                    brace_depth -= 1
-                                    if found_open and brace_depth == 0:
-                                        body_end = b_idx + 1
-                                        break
-                            if found_open and brace_depth == 0:
-                                break
-                        handler_body = '\n'.join(self.source_lines[body_start:body_end])
-
-                        is_destructive = destructive_method_patterns.search(handler_body)
-
-                        if is_destructive:
-                            self._add_finding(
-                                line_num,
-                                "MFLAC - Service method relies on class-level @PreAuthorize inheritance",
-                                VulnCategory.IDOR, Severity.MEDIUM, "HIGH",
-                                description=f"Method '{method.name}' in @Service class '{class_node.name}' performs "
-                                f"destructive operations ({is_destructive.group()}) but has no explicit "
-                                f"@PreAuthorize annotation. It relies on class-level annotation inheritance, "
-                                f"which can be bypassed with misconfigured proxy modes or internal method calls."
-                            )
-
-
 class PHPAnalyzer:
     """
     PHP analyzer with taint tracking for common web vulnerabilities.
@@ -6632,11 +5515,62 @@ class PHPAnalyzer:
         self.table_name_vars: Dict[str, Tuple[int, str]] = {}  # var -> (line, source)
 
         self._identify_taint_sources()
+        self._check_regex_validation_gates()
         self._track_variable_assignments()
         self._track_database_sources()
         self._track_json_decoded()
         self._track_unserialized()
         self._track_table_names()
+
+    def _check_regex_validation_gates(self):
+        """Remove taint from variables validated by anchored regex with exit() gates.
+
+        Pattern: if(!preg_match($pattern, $var)) { ... exit(); ... }
+        If the regex is anchored (^...$) and the failure branch exits,
+        the variable cannot carry SQL injection characters.
+        """
+        for i, line in enumerate(self.source_lines, 1):
+            # Match if(!preg_match($pattern, $var))
+            m = re.search(
+                r'if\s*\(\s*!\s*preg_match\s*\(\s*(\$\w+)\s*,\s*\$(\w+)\s*\)',
+                line)
+            if not m:
+                continue
+            pattern_var = m.group(1)
+            checked_var = m.group(2)
+
+            if checked_var not in self.tainted_vars:
+                continue
+
+            # Check if the if-body (next few lines) has exit()/die()
+            has_exit = False
+            for j in range(i, min(i + 10, len(self.source_lines))):
+                body_line = self.source_lines[j]
+                if re.search(r'\b(?:exit|die|return)\b', body_line):
+                    has_exit = True
+                    break
+                # Stop at closing brace of the if block
+                if body_line.strip() == '}':
+                    break
+            if not has_exit:
+                continue
+
+            # Resolve the regex pattern variable (search all lines before the check)
+            pattern_literal = None
+            for j in range(0, i):
+                pm = re.search(
+                    rf'{re.escape(pattern_var)}\s*=\s*["\'](.+?)["\']',
+                    self.source_lines[j])
+                if pm:
+                    pattern_literal = pm.group(1)
+
+            if not pattern_literal:
+                continue
+
+            # Check if the regex is anchored (^...$)
+            inner = re.sub(r'^/(.+)/[a-z]*$', r'\1', pattern_literal)
+            if inner.startswith('^') and inner.endswith('$'):
+                del self.tainted_vars[checked_var]
 
     def _identify_taint_sources(self):
         """Identify PHP superglobals and function parameters as taint sources."""
@@ -6646,12 +5580,28 @@ class PHPAnalyzer:
             r'file_get_contents\s*\(\s*["\']php://input',
         ]
 
+        # getenv() keys that are NOT attacker-controlled
+        safe_getenv_keys = {'REMOTE_ADDR', 'REMOTE_PORT', 'SERVER_ADDR', 'SERVER_PORT'}
+
         for i, line in enumerate(self.source_lines, 1):
+            # Skip getenv("REMOTE_ADDR") and similar server-derived values
+            if re.search(r'getenv\s*\(', line):
+                if any(key in line for key in safe_getenv_keys):
+                    continue
+
             for sg in superglobals:
                 if re.search(sg, line):
                     # Extract variable being assigned
                     match = re.search(r'\$(\w+)\s*=', line)
                     if match:
+                        # Skip if the superglobal is wrapped in a hash/sanitizer
+                        # function (e.g. $password = md5($_POST["password"]))
+                        # — the output is NOT user-controlled data
+                        if re.search(r'=\s*(?:md5|sha1|hash|crypt|password_hash|'
+                                     r'mysqli_real_escape_string|intval|floatval|'
+                                     r'htmlspecialchars|htmlentities|addslashes|'
+                                     r'escapeshellarg|escapeshellcmd)\s*\(', line):
+                            continue
                         self.tainted_vars[match.group(1)] = i
 
         # Function parameters
@@ -6662,6 +5612,28 @@ class PHPAnalyzer:
                 params = match.group(1)
                 for param in re.findall(r'\$(\w+)', params):
                     self.tainted_vars[param] = i
+
+    # Functions whose return value does NOT carry taint (sinks / metadata)
+    TAINT_SINK_FUNCTIONS = [
+        r'mysqli_query\s*\(', r'mysqli_real_query\s*\(',
+        r'mysql_query\s*\(', r'pg_query\s*\(',
+        r'sqlite_query\s*\(', r'mysql_db_query\s*\(',
+        r'mysql_unbuffered_query\s*\(',
+        r'mysqli_num_rows\s*\(', r'mysqli_affected_rows\s*\(',
+        r'mysqli_insert_id\s*\(', r'mysqli_error\s*\(',
+        r'mysqli_errno\s*\(', r'mysqli_field_count\s*\(',
+        r'mysql_num_rows\s*\(', r'mysql_affected_rows\s*\(',
+        r'mysql_insert_id\s*\(', r'mysql_error\s*\(',
+        r'pg_num_rows\s*\(', r'pg_affected_rows\s*\(',
+        r'mysqli_fetch_array\s*\(', r'mysqli_fetch_assoc\s*\(',
+        r'mysqli_fetch_row\s*\(', r'mysqli_fetch_object\s*\(',
+        r'mysql_fetch_array\s*\(', r'mysql_fetch_assoc\s*\(',
+        r'mysql_fetch_row\s*\(', r'mysql_fetch_object\s*\(',
+        r'pg_fetch_assoc\s*\(', r'pg_fetch_row\s*\(',
+        # Hash functions — output is a fixed-format hex string, not user data
+        r'md5\s*\(', r'sha1\s*\(', r'hash\s*\(',
+        r'crypt\s*\(', r'password_hash\s*\(',
+    ]
 
     def _track_variable_assignments(self):
         """Track variable assignments to propagate taint."""
@@ -6696,6 +5668,12 @@ class PHPAnalyzer:
                 if is_sanitized:
                     self.sanitized_vars.add(var_name)
                     # Don't propagate taint - variable is sanitized
+                    continue
+
+                # Check if RHS calls a taint-sink function — return value is NOT tainted
+                is_sink = any(re.search(sf, rhs) for sf in self.TAINT_SINK_FUNCTIONS)
+                if is_sink:
+                    # Sink consumes tainted data; its return value is not user data
                     continue
 
                 for tainted in list(self.tainted_vars.keys()):
@@ -6911,6 +5889,120 @@ class PHPAnalyzer:
             return True, '$_REQUEST'
         return False, None
 
+    def _is_tainted_rhs_only(self, line: str, line_num: int = 0) -> Tuple[bool, Optional[str]]:
+        """Check taint only on the RHS of an assignment (ignoring LHS variable name).
+
+        For SQL string construction lines like ``$sql = "SELECT ... WHERE x='$var'"``,
+        the global ``_is_tainted`` would match ``$sql`` on the LHS even when the
+        interpolated variables are safe.  This method extracts the RHS and only
+        checks whether the interpolated variables there are actually tainted.
+        Falls back to ``_is_tainted`` for non-assignment lines.
+        """
+        assign_match = re.match(r'\s*\$(\w+)\s*=\s*(.+)', line)
+        if not assign_match:
+            return self._is_tainted(line)
+
+        lhs_var = assign_match.group(1)
+        rhs = assign_match.group(2)
+
+        # Don't strip single-quoted substrings here — they may be literal
+        # quote characters inside a double-quoted PHP string (e.g.
+        # "SELECT ... WHERE x='$var'") and stripping would lose $var.
+        rhs_clean = rhs
+
+        # Arithmetic operations force numeric conversion in PHP, preventing
+        # string-based injection.  E.g. $start = ($pageno * $limit) - $limit
+        # Even if $pageno is tainted, the result is always numeric.
+        if re.search(r'[\*/%]', rhs) and not re.search(r'["\']', rhs):
+            return False, None
+
+        # Check direct superglobal use in RHS
+        if re.search(r'\$_(GET|POST|REQUEST|COOKIE|SERVER|FILES)\s*\[', rhs_clean):
+            return True, '$_REQUEST'
+
+        # Check interpolated variables in RHS
+        for var in re.findall(r'\$(\w+)', rhs_clean):
+            if var == lhs_var:
+                continue  # skip self-reference
+            if var in ('con', 'conn', 'connection', 'db', 'pdo', 'mysqli', 'this'):
+                continue  # skip connection objects
+            if var in self.tainted_vars:
+                if hasattr(self, 'sanitized_vars') and var in self.sanitized_vars:
+                    continue
+                # Inline sanitization check
+                inline_sanitizers = [
+                    rf'escapeshellarg\s*\(\s*\${re.escape(var)}\s*\)',
+                    rf'escapeshellcmd\s*\(\s*\${re.escape(var)}\s*\)',
+                    rf'intval\s*\(\s*\${re.escape(var)}\s*\)',
+                    rf'\(int\)\s*\${re.escape(var)}\b',
+                    rf'mysqli_real_escape_string\s*\([^,]*,\s*\${re.escape(var)}\s*\)',
+                ]
+                if any(re.search(san, rhs) for san in inline_sanitizers):
+                    continue
+                # Flow-sensitive check: if the variable was reassigned to a
+                # safe value (md5, sanitizer, sink) BEFORE this line, it's
+                # not tainted at this point even though globally tainted.
+                if line_num > 0 and self._var_reassigned_safe(var, line_num):
+                    continue
+                return True, var
+
+        return False, None
+
+    def _var_reassigned_safe(self, var_name: str, before_line: int) -> bool:
+        """Check if the nearest assignment to ``$var_name`` before
+        ``before_line`` is a safe (non-tainted) value.
+
+        Scans ALL lines before ``before_line`` (not just from the taint
+        source) to handle cases where tainted_vars stores a later line.
+        """
+        # Scan all lines before usage for assignments to this variable
+        nearest_line = 0
+        nearest_rhs = None
+        pattern = rf'\${re.escape(var_name)}\s*=\s*(.+?);\s*$'
+        for i in range(0, min(before_line - 1, len(self.source_lines))):
+            line = self.source_lines[i]
+            m = re.search(pattern, line)
+            if m and (i + 1) > nearest_line:
+                nearest_line = i + 1  # 1-indexed
+                nearest_rhs = m.group(1)
+
+        if nearest_rhs is None:
+            return False  # no reassignment found
+
+        # Check if the nearest reassignment is a safe function
+        safe_patterns = [
+            r'md5\s*\(', r'sha1\s*\(', r'hash\s*\(', r'crypt\s*\(',
+            r'password_hash\s*\(', r'intval\s*\(', r'floatval\s*\(',
+            r'\(int\)', r'\(float\)', r'\(integer\)',
+            r'htmlspecialchars\s*\(', r'htmlentities\s*\(',
+            r'addslashes\s*\(', r'escapeshellarg\s*\(',
+            r'escapeshellcmd\s*\(', r'mysqli_real_escape_string\s*\(',
+            r'pg_escape_string\s*\(',
+        ]
+        # Also check TAINT_SINK_FUNCTIONS
+        for sf in self.TAINT_SINK_FUNCTIONS:
+            if re.search(sf, nearest_rhs):
+                return True
+        for sp in safe_patterns:
+            if re.search(sp, nearest_rhs):
+                return True
+
+        # Arithmetic operations force numeric conversion — result is safe
+        if re.search(r'[\*/%]', nearest_rhs) and not re.search(r'["\']', nearest_rhs):
+            return True
+
+        # If the nearest RHS contains NO tainted variables at all, it's safe
+        # (e.g. $start = 0, or $var = "literal")
+        rhs_has_taint = False
+        for tv in self.tainted_vars:
+            if re.search(rf'\${re.escape(tv)}\b', nearest_rhs):
+                rhs_has_taint = True
+                break
+        if not rhs_has_taint and not re.search(r'\$_(GET|POST|REQUEST|COOKIE)\s*\[', nearest_rhs):
+            return True
+
+        return False
+
     def get_line_content(self, lineno: int) -> str:
         if 1 <= lineno <= len(self.source_lines):
             return self.source_lines[lineno - 1]
@@ -6932,7 +6024,6 @@ class PHPAnalyzer:
         self._check_unserialize_sqli()
         # 2nd-order XPath injection detection
         self._check_xpath_injection()
-        self._check_idor()
         return self.findings
 
     def _add_finding(self, line_num: int, vuln_name: str, category: VulnCategory,
@@ -7077,7 +6168,22 @@ class PHPAnalyzer:
                         if not re.search(r'\$\w+', sql_content):
                             continue  # Safe: static query
 
-                is_tainted, taint_var = self._is_tainted(line)
+                # Skip lines that are DB sink calls (assignment or condition form)
+                # e.g. "$run_query = mysqli_query($con,$sql)" or
+                #      "if(mysqli_query($con,$sql))" — the tainted var is the
+                # argument being consumed, report on the construction line instead
+                if re.search(r'(?:^\s*\$\w+\s*=\s*|^\s*if\s*\(|^\s*)(?:mysqli_query|mysql_query|pg_query|'
+                             r'sqlite_query|mysqli_real_query)\s*\(', line):
+                    continue
+
+                # For assignment lines ($var = "SQL..."), only check RHS for taint
+                # to avoid FP from globally-tainted LHS variable names (e.g. $sql
+                # reused across independent if-blocks)
+                is_assignment = re.match(r'\s*\$\w+\s*=', line)
+                if is_assignment:
+                    is_tainted, taint_var = self._is_tainted_rhs_only(line, i)
+                else:
+                    is_tainted, taint_var = self._is_tainted(line)
                 has_concat = '.' in line or '+' in line or re.search(r'\$\w+', line)
 
                 # Skip sprintf with only integer format specifiers (%d, %i, %u, %x, %o)
@@ -7487,8 +6593,13 @@ class PHPAnalyzer:
                 continue
 
             # Check for calculation functions with JSON-poisoned values
+            # Only match inside SQL string context (inside quotes), not PHP
+            # functions like count($array) which are not SQL
             for pattern, func_name in calc_patterns:
                 if re.search(pattern, line, re.IGNORECASE):
+                    # Ensure it's in a SQL string context (inside quotes)
+                    if not re.search(r'["\'].*' + func_name + r'\s*\(', line, re.IGNORECASE):
+                        continue
                     is_json, json_var, source = self._is_json_poisoned(line)
                     if is_json:
                         self._add_finding(
@@ -7555,13 +6666,16 @@ class PHPAnalyzer:
             if line.strip().startswith('//') or line.strip().startswith('#'):
                 continue
 
-            # Check for direct DB-sourced values in SQL calculation context
-            if re.search(r'(?:SUM|COUNT|AVG|MIN|MAX)\s*\(', line, re.IGNORECASE):
-                is_db, db_var, source = self._is_db_sourced(line)
-                if is_db:
+            # Check for direct DB-sourced values used AS column names in aggregate
+            # functions (e.g. SUM($db_var)), NOT just anywhere on the line
+            agg_match = re.search(r'(?:SUM|COUNT|AVG|MIN|MAX)\s*\(\s*\$(\w+)', line, re.IGNORECASE)
+            if agg_match:
+                agg_var = agg_match.group(1)
+                if agg_var in self.db_sourced_vars:
+                    source = self.db_sourced_vars[agg_var][1]
                     self._add_finding(
                         i, "2nd-Order SQLi - Calculation with DB-sourced column",
-                        VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH", db_var,
+                        VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH", agg_var,
                         f"DB value from {source} used as column in aggregate function."
                     )
 
@@ -7763,308 +6877,6 @@ class PHPAnalyzer:
                         VulnCategory.XPATH_INJECTION, Severity.CRITICAL, "HIGH", db_var,
                         f"DB value from {source} concatenated into XPath expression."
                     )
-
-    def _check_idor(self):
-        """Check for Insecure Direct Object Reference / Broken Access Control vulnerabilities in PHP."""
-
-        # Direct lookup patterns using user input (ORM / framework)
-        direct_lookup_patterns = [
-            (r'(?:::|\->)find\s*\(\s*\$(?:_GET|_POST|_REQUEST)\s*\[', "IDOR - Direct model lookup by user-supplied ID"),
-            (r'(?:::|\->)find\s*\(\s*\$(?:request|req)\s*->\s*(?:input|get|query)\s*\(', "IDOR - Direct model lookup by user-supplied ID"),
-            (r'(?:::|\->)findOrFail\s*\(\s*\$(?:_GET|_POST|_REQUEST)\s*\[', "IDOR - Direct model lookup by user-supplied ID"),
-            (r'(?:::|\->)findOrFail\s*\(\s*\$(?:request|req)\s*->\s*(?:input|get|query)\s*\(', "IDOR - Direct model lookup by user-supplied ID"),
-            (r'->where\s*\(\s*[\'"]id[\'"]\s*,\s*\$(?:_GET|_POST|_REQUEST)\s*\[', "IDOR - Direct DB query by user-supplied ID"),
-            (r'->where\s*\(\s*[\'"]id[\'"]\s*,\s*\$(?:request|req)\s*->\s*(?:input|get|query)\s*\(', "IDOR - Direct DB query by user-supplied ID"),
-            (r'->delete\s*\(\s*\$(?:_GET|_POST|_REQUEST)\s*\[', "IDOR - Direct deletion by user-supplied ID"),
-            (r'->destroy\s*\(\s*\$(?:_GET|_POST|_REQUEST)\s*\[', "IDOR - Direct destruction by user-supplied ID"),
-            (r'->destroy\s*\(\s*\$(?:request|req)\s*->\s*(?:input|get|query)\s*\(', "IDOR - Direct destruction by user-supplied ID"),
-        ]
-
-        # Vanilla PHP: direct array/data access using superglobal
-        vanilla_direct_patterns = [
-            (r'\$\w+\s*\[\s*\$(?:_GET|_POST|_REQUEST)\s*\[', "IDOR - Array/data access by user-supplied key"),
-            (r'\$\w+\s*\[\s*\$(?:_GET|_POST|_REQUEST)\s*\[.*\]\s*\]', "IDOR - Array/data access by user-supplied key"),
-        ]
-
-        # Mass assignment patterns
-        mass_assignment_patterns = [
-            (r'->fill\s*\(\s*\$(?:request|req)\s*->all\s*\(\s*\)\s*\)', "IDOR - Mass assignment via $request->all()"),
-            (r'->update\s*\(\s*\$(?:request|req)\s*->all\s*\(\s*\)\s*\)', "IDOR - Mass assignment via $request->all() in update"),
-            (r'::create\s*\(\s*\$(?:request|req)\s*->all\s*\(\s*\)\s*\)', "IDOR - Mass assignment via $request->all() in create"),
-            (r'->fill\s*\(\s*\$_(?:POST|REQUEST)\s*\)', "IDOR - Mass assignment via raw superglobal"),
-            (r'::create\s*\(\s*\$_(?:POST|REQUEST)\s*\)', "IDOR - Mass assignment via raw superglobal"),
-            (r'->update\s*\(\s*\$_(?:POST|REQUEST)\s*\)', "IDOR - Mass assignment via raw superglobal"),
-        ]
-
-        # Authorization context patterns
-        auth_context_patterns = [
-            r'Auth::user\(\)', r'auth\(\)->user\(\)', r'\$this->authorize\(',
-            r'Gate::allows\(', r'Gate::denies\(', r'->can\(',
-            r'Policy', r'middleware\s*\(\s*[\'"]auth',
-            r'Auth::id\(\)', r'auth\(\)->id\(\)',
-            r'->user\(\)->id', r'user_id\s*=.*auth',
-            r'abort_unless\(', r'abort_if\(',
-            r'where\s*\(\s*[\'"]user_id[\'"]\s*,\s*(?:auth|Auth)',
-            r'belongsTo', r'hasMany',
-            # Vanilla PHP session-based auth checks
-            r'\$_SESSION\s*\[\s*[\'"](?:user_id|userid|uid|user)[\'"]',
-            r'session_id\s*\(\)', r'checkSession', r'isLoggedIn',
-        ]
-
-        # Session/auth ownership patterns (check that session/auth user == requested resource)
-        ownership_patterns = [
-            r'\$_SESSION\s*\[.*\]\s*[!=]==?\s*\$',
-            r'\$\w+\s*[!=]==?\s*\$_SESSION\s*\[',
-            r'session_id.*==', r'===?\s*\$_SESSION',
-            # OOP auth ownership: $user->id ==, Auth::id() ==, etc.
-            r'->id\s*[!=]==?\s*\$',
-            r'\$\w+\s*[!=]==?\s*.*->id\b',
-            r'Auth::id\(\)\s*[!=]==?',
-            r'auth\(\)->id\(\)\s*[!=]==?',
-            r'->user\(\)->id\s*[!=]==?',
-            r'[!=]==?\s*auth\(\)->id\(\)',
-            r'[!=]==?\s*Auth::id\(\)',
-            r'abort\s*\(\s*403\s*\)',
-            # Role-based authorization (e.g., $role == 'admin', $user['role'] == 'admin')
-            r'\$\w*role\w*\s*[!=]==?\s*[\'"]admin[\'"]',
-            r'\[.role.\]\s*[!=]==?\s*[\'"]admin[\'"]',
-            r'->role\s*[!=]==?\s*[\'"]admin[\'"]',
-            r'->isAdmin\s*\(\s*\)', r'->hasRole\s*\(',
-        ]
-
-        for i, line in enumerate(self.source_lines, 1):
-            stripped = line.strip()
-            if stripped.startswith('//') or stripped.startswith('#') or stripped.startswith('/*'):
-                continue
-
-            context_start = max(0, i - 6)
-            context_end = min(len(self.source_lines), i + 6)
-            context = '\n'.join(self.source_lines[context_start:context_end])
-
-            has_auth_context = any(re.search(pat, context, re.IGNORECASE) for pat in auth_context_patterns)
-            has_ownership_check = any(re.search(pat, context) for pat in ownership_patterns)
-
-            # Check direct ORM lookup patterns
-            for pattern, vuln_name in direct_lookup_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    if has_auth_context and has_ownership_check:
-                        continue
-                    self._add_finding(i, vuln_name,
-                                      VulnCategory.IDOR, Severity.HIGH, "MEDIUM",
-                                      description="Database lookup uses user-supplied ID without authorization check. "
-                                      "Verify the requesting user owns or has access to the resource.")
-
-            # Check vanilla PHP direct access patterns
-            for pattern, vuln_name in vanilla_direct_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    if has_auth_context and has_ownership_check:
-                        continue
-                    self._add_finding(i, vuln_name,
-                                      VulnCategory.IDOR, Severity.HIGH, "MEDIUM",
-                                      description="Data accessed using user-supplied key without authorization check. "
-                                      "Verify the requesting user is authorized to access the requested resource.")
-
-            # Check mass assignment patterns
-            for pattern, vuln_name in mass_assignment_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    self._add_finding(i, vuln_name,
-                                      VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                                      description="Raw request data passed directly to model operation. "
-                                      "Use $request->only() or $request->validated() to whitelist fields.")
-
-            # Check route definitions without auth middleware for destructive operations
-            if re.search(r'Route::(?:delete|put|patch)\s*\(', line, re.IGNORECASE):
-                route_context = '\n'.join(self.source_lines[max(0, i - 5):min(len(self.source_lines), i + 5)])
-                has_auth_middleware = re.search(r'middleware\s*\(\s*[\'"]auth', route_context, re.IGNORECASE)
-                if not has_auth_middleware:
-                    self._add_finding(i, "IDOR - Destructive route without auth middleware",
-                                      VulnCategory.IDOR, Severity.MEDIUM, "MEDIUM",
-                                      description="Destructive route (DELETE/PUT/PATCH) appears to lack auth middleware.")
-
-            # Indirect IDOR: variable assigned from $_GET/$_POST/$request->input() then used
-            input_match = re.search(r'\$(\w+)\s*=\s*\$(?:_GET|_POST|_REQUEST)\s*\[\s*[\'"](\w+)[\'"]\s*\]', line)
-            if not input_match:
-                # Also capture $request->input('key'), $request->get('key'), $request->query('key')
-                input_match = re.search(r'\$(\w+)\s*=\s*\$(?:request|req)\s*->\s*(?:input|get|query)\s*\(\s*[\'"](\w+)[\'"]', line)
-            if input_match:
-                var_name = input_match.group(1)
-                param_name = input_match.group(2)
-                # Scan forward for usage of this variable as a key or in a lookup
-                for j in range(i, min(len(self.source_lines), i + 20)):
-                    fwd_line = self.source_lines[j]
-                    # Array access: $array[$var] or isset($array[$var])
-                    indirect_access_pats = [
-                        rf'\$\w+\s*\[\s*\${re.escape(var_name)}\s*\]',
-                        rf'isset\s*\(\s*\$\w+\s*\[\s*\${re.escape(var_name)}\s*\]',
-                        rf'(?:::|\->)find\s*\(\s*\${re.escape(var_name)}\s*\)',
-                        rf'(?:::|\->)findOrFail\s*\(\s*\${re.escape(var_name)}\s*\)',
-                        rf'->where\s*\(\s*[\'"]id[\'"]\s*,\s*\${re.escape(var_name)}\s*\)',
-                        rf'->delete\s*\(\s*\${re.escape(var_name)}\s*\)',
-                        rf'->destroy\s*\(\s*\${re.escape(var_name)}\s*\)',
-                        rf'WHERE\s+\w*id\s*=.*\${re.escape(var_name)}',
-                        rf'->execute\s*\(\s*\[\s*\${re.escape(var_name)}',
-                    ]
-                    for iap in indirect_access_pats:
-                        if re.search(iap, fwd_line, re.IGNORECASE):
-                            fwd_ctx_start = max(0, j - 6)
-                            fwd_ctx_end = min(len(self.source_lines), j + 6)
-                            fwd_context = '\n'.join(self.source_lines[fwd_ctx_start:fwd_ctx_end])
-                            fwd_has_auth = any(re.search(ap, fwd_context, re.IGNORECASE) for ap in auth_context_patterns)
-                            fwd_has_owner = any(re.search(op, fwd_context) for op in ownership_patterns)
-                            if not (fwd_has_auth and fwd_has_owner):
-                                self._add_finding(j + 1, "IDOR - Indirect data access by user-supplied ID",
-                                                  VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                                                  taint_var=var_name,
-                                                  description=f"Variable ${var_name} from $_GET['{param_name}'] used to access "
-                                                  f"data without verifying the session user owns the resource. "
-                                                  f"Compare $_SESSION['user_id'] against the requested ID before returning data.")
-                                break  # Only report once per forward scan
-                    else:
-                        continue
-                    break
-
-        # =====================================================================
-        # MFLAC: Missing Function Level Access Control (PHP/Laravel)
-        # =====================================================================
-
-        # Auth-only middleware (confirm identity, NOT privilege)
-        php_auth_only = [
-            r"middleware\s*\(\s*['\"]auth['\"]",
-            r"middleware\s*\(\s*['\"]auth:api['\"]",
-            r"middleware\s*\(\s*['\"]auth:sanctum['\"]",
-            r"middleware\s*\(\s*['\"]verified['\"]",
-        ]
-
-        # Role/privilege middleware (confirm specific privilege)
-        php_role_middleware = [
-            r"middleware\s*\(\s*['\"]admin['\"]",
-            r"middleware\s*\(\s*['\"]role:admin['\"]",
-            r"middleware\s*\(\s*['\"]can:",
-            r"middleware\s*\(\s*['\"]permission:",
-            r"->authorize\s*\(",
-            r"Gate::allows\s*\(",
-            r"Gate::denies\s*\(",
-            r"\$this->authorize\s*\(",
-            r"->hasRole\s*\(",
-            r"->hasPermission\s*\(",
-            r"->can\s*\(",
-        ]
-
-        # Admin path indicators
-        php_admin_paths = [
-            r'/admin/', r'/api/admin/', r'/management/', r'/internal/',
-            r'/superadmin/', r'/moderator/',
-            r'system-reset', r'system-config', r'reset-all',
-            r'delete-all', r'purge', r'wipe',
-            r'/users/delete', r'/users/ban',
-            r'/config/', r'/settings/global', r'/roles/', r'/permissions/',
-        ]
-
-        for i, line in enumerate(self.source_lines, 1):
-            stripped = line.strip()
-            # Match Laravel/PHP route definitions
-            route_match = re.search(
-                r'Route::(?:get|post|put|delete|patch|any)\s*\(\s*[\'"]([^\'"]+)[\'"]',
-                stripped, re.IGNORECASE
-            )
-            if not route_match:
-                continue
-
-            route_path = route_match.group(1)
-            is_admin_path = any(re.search(pat, route_path, re.IGNORECASE) for pat in php_admin_paths)
-            if not is_admin_path:
-                continue
-
-            # Check for middleware in the route definition and surrounding context
-            route_context_end = min(len(self.source_lines), i + 5)
-            route_context = '\n'.join(self.source_lines[i-1:route_context_end])
-
-            has_auth_only = any(re.search(pat, route_context) for pat in php_auth_only)
-            has_role_check = any(re.search(pat, route_context) for pat in php_role_middleware)
-
-            # Also check controller method body for inline role checks
-            handler_end = min(len(self.source_lines), i + 15)
-            handler_body = '\n'.join(self.source_lines[i-1:handler_end])
-            has_inline_role = re.search(
-                r'->hasRole|->isAdmin|->can\s*\(|->hasPermission|'
-                r'Gate::allows|authorize\s*\(|abort_unless.*admin|'
-                r'\$user->role\s*[!=]==?\s*[\'"]admin',
-                handler_body, re.IGNORECASE
-            )
-
-            is_mutating = re.search(r'Route::(?:post|put|delete|patch)', stripped, re.IGNORECASE)
-
-            if has_auth_only and not has_role_check and not has_inline_role:
-                sev = Severity.HIGH if is_mutating else Severity.MEDIUM
-                self._add_finding(
-                    i,
-                    "MFLAC - Admin route with auth-only middleware",
-                    VulnCategory.IDOR, sev, "HIGH",
-                    description=f"Route '{route_path}' uses middleware('auth') but lacks role-based "
-                    f"authorization (e.g., middleware('admin'), Gate, ->authorize()). Any authenticated "
-                    f"user can access this privileged endpoint."
-                )
-
-        # --- Inline MFLAC: Auth::check() guarding destructive operations without role check ---
-        # Detects: if (Auth::check()) { Model::destroy(...); }
-
-        php_inline_auth_only = [
-            r'Auth::check\s*\(\s*\)',
-            r'auth\(\)->check\s*\(\s*\)',
-            r'Auth::user\s*\(\s*\)',
-            r'\$request->user\s*\(\s*\)',
-        ]
-
-        php_inline_role_checks = [
-            r'Auth::user\(\)->(?:is_admin|isAdmin|hasRole|can|hasPermission)',
-            r'->role\s*[!=]==?\s*[\'"]admin',
-            r'Gate::allows', r'Gate::denies',
-            r'authorize\s*\(', r'->can\s*\(',
-            r'->hasRole\s*\(', r'->hasPermission\s*\(',
-            r'abort_unless.*(?:admin|role)', r'abort_if.*(?:admin|role)',
-        ]
-
-        php_destructive_sinks = [
-            r'\w+::destroy\s*\(', r'\w+::delete\s*\(',
-            r'->delete\s*\(\s*\)', r'->forceDelete\s*\(',
-            r'\w+::truncate\s*\(', r'DB::(?:delete|statement)\s*\(',
-            r'->drop\s*\(', r'Schema::drop',
-        ]
-
-        for i, line in enumerate(self.source_lines, 1):
-            stripped = line.strip()
-
-            # Look for auth-only guard
-            if not any(re.search(pat, stripped) for pat in php_inline_auth_only):
-                continue
-
-            # Check forward (inside the if block) for destructive sinks
-            block_end = min(len(self.source_lines), i + 10)
-            block_content = '\n'.join(self.source_lines[i-1:block_end])
-
-            has_destructive = any(re.search(pat, block_content) for pat in php_destructive_sinks)
-            if not has_destructive:
-                continue
-
-            # Check if there's also a role check in the block
-            has_role = any(re.search(pat, block_content, re.IGNORECASE) for pat in php_inline_role_checks)
-            if has_role:
-                continue
-
-            # Find the actual destructive line for better reporting
-            for j in range(i - 1, block_end):
-                fwd_line = self.source_lines[j]
-                if any(re.search(pat, fwd_line) for pat in php_destructive_sinks):
-                    self._add_finding(
-                        j + 1,
-                        "MFLAC - Destructive action guarded by auth-only check",
-                        VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                        description="A destructive operation (destroy/delete) is guarded only by "
-                        "Auth::check() which confirms the user is logged in, but does NOT verify "
-                        "they have admin privileges. Any authenticated user can perform this action."
-                    )
-                    break
-
 
 class CSharpAnalyzer:
     """
@@ -8279,7 +7091,6 @@ class CSharpAnalyzer:
         self._check_viewstate_vulnerabilities()
         # 2nd-order SQL injection detection
         self._check_second_order_sqli()
-        self._check_idor()
         return self.findings
 
     def _add_finding(self, line_num: int, vuln_name: str, category: VulnCategory,
@@ -9195,237 +8006,6 @@ class CSharpAnalyzer:
                         f"Entity property from {source} in SqlCommand."
                     )
 
-    def _check_idor(self):
-        """Check for Insecure Direct Object Reference / Broken Access Control vulnerabilities in C#."""
-
-        # Direct lookup patterns from user input
-        direct_lookup_patterns = [
-            (r'(?:_context|context|db|_db)\.(?:\w+)\.Find\s*\(\s*id\s*\)', "IDOR - Direct DbContext.Find by user-supplied ID"),
-            (r'(?:_context|context|db|_db)\.(?:\w+)\.FindAsync\s*\(\s*id\s*\)', "IDOR - Direct DbContext.FindAsync by user-supplied ID"),
-            (r'(?:_context|context|db|_db)\.(?:\w+)\.FirstOrDefault\s*\(\s*\w+\s*=>\s*\w+\.Id\s*==\s*id\s*\)', "IDOR - Direct entity lookup by user-supplied ID"),
-            (r'_repository\.GetById\s*\(\s*id\s*\)', "IDOR - Direct repository lookup by user-supplied ID"),
-            (r'_repository\.Get\s*\(\s*id\s*\)', "IDOR - Direct repository lookup by user-supplied ID"),
-            # Generic collection lookup: _items.Find(x => x.Id == id)
-            (r'\w+\.Find\s*\(\s*\w+\s*=>\s*\w+\.Id\s*==\s*id\s*\)', "IDOR - Direct collection lookup by user-supplied ID"),
-            (r'\w+\.FirstOrDefault\s*\(\s*\w+\s*=>\s*\w+\.Id\s*==\s*id\s*\)', "IDOR - Direct LINQ lookup by user-supplied ID"),
-            (r'\w+\.SingleOrDefault\s*\(\s*\w+\s*=>\s*\w+\.Id\s*==\s*id\s*\)', "IDOR - Direct LINQ lookup by user-supplied ID"),
-            (r'\w+\.First\s*\(\s*\w+\s*=>\s*\w+\.Id\s*==\s*id\s*\)', "IDOR - Direct LINQ lookup by user-supplied ID"),
-            # Where(... == someVar).FirstOrDefault() / .SingleOrDefault() / .First() — also on continuation lines
-            (r'\.?Where\s*\(\s*\w+\s*=>\s*\w+\.\w+\s*==\s*\w+', "IDOR - LINQ Where lookup by user-supplied ID"),
-        ]
-
-        # Mass assignment patterns
-        mass_assignment_patterns = [
-            (r'\[HttpPost\].*\n.*\(\s*\[FromBody\]\s+\w+\s+\w+\s*\)', "IDOR - Potential mass assignment via [FromBody]"),
-        ]
-
-        # Auth context patterns
-        auth_context_patterns = [
-            r'\[Authorize\]', r'\[Authorize\s*\(', r'User\.Identity',
-            r'User\.FindFirst', r'User\.IsInRole', r'ClaimTypes\.',
-            r'HttpContext\.User', r'\.UserId\b', r'currentUserId',
-            r'GetUserId\(\)', r'IsOwner', r'CheckOwnership',
-            r'IAuthorizationService', r'\.AuthorizeAsync\(',
-            r'\[AllowAnonymous\]',
-            r'Forbid\(', r'\.OwnerId', r'GetCurrentUser',
-        ]
-
-        for i, line in enumerate(self.source_lines, 1):
-            stripped = line.strip()
-            if stripped.startswith('//') or stripped.startswith('/*'):
-                continue
-
-            # For auth context, find the method boundary (look upward for the method's Http attribute)
-            method_start = i - 1
-            for back in range(i - 2, max(0, i - 10) - 1, -1):
-                back_line = self.source_lines[back].strip()
-                if re.search(r'\[Http(?:Get|Post|Put|Delete|Patch)', back_line):
-                    method_start = back
-                    break
-                if back_line.startswith('}') or (back_line and not back_line.startswith('//') and not back_line.startswith('[') and not back_line.startswith('{') and 'public' not in back_line and 'private' not in back_line and 'async' not in back_line and back_line != ''):
-                    break
-
-            # Auth context: only look from method_start to a few lines after current
-            context_start = max(0, method_start - 5)
-            context_end = min(len(self.source_lines), i + 5)
-            context = '\n'.join(self.source_lines[context_start:context_end])
-
-            has_auth_context = any(re.search(pat, context) for pat in auth_context_patterns)
-
-            # Check direct lookup patterns
-            for pattern, vuln_name in direct_lookup_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    # Check if value comes from user input (route, query, cookies, etc.)
-                    param_context = '\n'.join(self.source_lines[max(0, method_start):i])
-                    is_user_input = bool(re.search(r'\[FromRoute\]|\[FromQuery\]|HttpGet.*\{id\}|HttpDelete.*\{id\}|HttpPut.*\{id\}', param_context))
-                    if not is_user_input:
-                        is_user_input = 'id' in self.tainted_vars
-                    if not is_user_input:
-                        is_user_input = bool(re.search(r'Request\.(?:Query|Form|Cookies|Headers)\s*\[|HttpContext\.Request', param_context))
-                    if not is_user_input:
-                        # Fallback: broader context check (method_start scan may stop too early at if-block braces)
-                        broad_context = '\n'.join(self.source_lines[max(0, i - 25):i])
-                        is_user_input = bool(re.search(r'Request\.(?:Query|Form|Cookies|Headers)\s*\[|HttpContext\.Request\.(?:Query|Form|Cookies|Headers)', broad_context))
-
-                    # Narrower auth check: use brace-depth counting to find method body end
-                    # Skip braces inside string literals (e.g. {id} in route attributes)
-                    method_end = min(len(self.source_lines), i + 15)
-                    brace_depth = 0
-                    found_method_open = False
-                    for fwd in range(method_start, min(len(self.source_lines), method_start + 30)):
-                        in_string = False
-                        string_char = None
-                        for ch in self.source_lines[fwd]:
-                            if in_string:
-                                if ch == string_char:
-                                    in_string = False
-                                continue
-                            if ch in ('"', "'"):
-                                in_string = True
-                                string_char = ch
-                                continue
-                            if ch == '{':
-                                brace_depth += 1
-                                found_method_open = True
-                            elif ch == '}':
-                                brace_depth -= 1
-                                if found_method_open and brace_depth == 0:
-                                    method_end = fwd + 1
-                                    break
-                        if found_method_open and brace_depth == 0:
-                            break
-                    method_context = '\n'.join(self.source_lines[max(0, method_start):method_end])
-                    has_method_auth = any(re.search(pat, method_context) for pat in auth_context_patterns)
-
-                    if is_user_input and not has_method_auth:
-                        self._add_finding(i, vuln_name,
-                                          VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                                          description="Database lookup uses user-supplied ID without authorization check. "
-                                          "Verify the requesting user owns or has access to the resource.")
-
-            # Check [AllowAnonymous] on destructive endpoints
-            if re.search(r'\[AllowAnonymous\]', line):
-                fwd_context = '\n'.join(self.source_lines[i:min(len(self.source_lines), i + 5)])
-                if re.search(r'\[Http(?:Delete|Put|Patch)\]', fwd_context):
-                    self._add_finding(i, "IDOR - [AllowAnonymous] on destructive endpoint",
-                                      VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                                      description="Destructive endpoint (DELETE/PUT/PATCH) is marked [AllowAnonymous]. "
-                                      "This allows unauthenticated users to modify or delete resources.")
-
-            # Check direct entity update from [FromBody] without field filtering
-            if re.search(r'\[FromBody\]', line):
-                param_match = re.search(r'\[FromBody\]\s+(\w+)\s+(\w+)', line)
-                if param_match:
-                    param_name = param_match.group(2)
-                    fwd_lines = self.source_lines[i:min(len(self.source_lines), i + 12)]
-                    for k, fwd_line in enumerate(fwd_lines):
-                        if re.search(rf'(?:_context|context|db)\.\w+\.(?:Update|Add)\s*\(\s*{re.escape(param_name)}\s*\)', fwd_line):
-                            fwd_context = '\n'.join(fwd_lines[:k + 1])
-                            has_field_filter = re.search(r'\.Select\(|AutoMapper|\.Map<|\.MapFrom', fwd_context)
-                            if not has_field_filter:
-                                self._add_finding(i + k + 1, "IDOR - Mass assignment via [FromBody] directly saved to DbContext",
-                                                  VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                                                  description="Entity from [FromBody] is saved directly without field filtering. "
-                                                  "An attacker could set privileged fields.")
-                            break
-
-        # =====================================================================
-        # MFLAC: Missing Function Level Access Control (C#/ASP.NET)
-        # =====================================================================
-
-        # Auth-only attributes
-        cs_auth_only = [
-            r'\[Authorize\]\s*(?://.*)?$',   # plain [Authorize] without roles/policy (may have trailing comment)
-            r'\[Authorize\(\)\]',             # [Authorize()]
-        ]
-
-        # Role/policy attributes
-        cs_role_attrs = [
-            r'\[Authorize\s*\(\s*Roles\s*=',
-            r'\[Authorize\s*\(\s*Policy\s*=',
-            r'\[Authorize\s*\(\s*AuthenticationSchemes.*Roles',
-            r'\[RequireRole', r'\[AdminOnly\]', r'\[IsAdmin\]',
-        ]
-
-        # Admin path indicators in ASP.NET route attributes
-        cs_admin_paths = [
-            r'admin/', r'api/admin/', r'management/', r'internal/',
-            r'superadmin/', r'moderator/',
-            r'system-reset', r'system-config', r'reset-all',
-            r'delete-all', r'purge', r'wipe',
-            r'users/delete', r'users/ban',
-            r'config/', r'settings/', r'roles/', r'permissions/',
-        ]
-
-        for i, line in enumerate(self.source_lines, 1):
-            stripped = line.strip()
-            # Match ASP.NET route attributes
-            route_match = re.search(
-                r'\[Http(?:Get|Post|Put|Delete|Patch)\s*\(\s*["\']([^"\']+)["\']',
-                stripped
-            )
-            if not route_match:
-                continue
-
-            route_path = route_match.group(1)
-            # Also combine with class-level [Route] to get full path
-            class_route = ''
-            for back in range(i - 2, max(0, i - 30) - 1, -1):
-                class_route_match = re.search(r'\[Route\s*\(\s*["\']([^"\']+)["\']', self.source_lines[back])
-                if class_route_match:
-                    class_route = class_route_match.group(1)
-                    break
-                if re.search(r'^\s*(?:namespace|using)\s', self.source_lines[back]):
-                    break
-            combined_path = (class_route + '/' + route_path).lower() if class_route else route_path.lower()
-            is_admin_path = any(re.search(pat, combined_path, re.IGNORECASE) for pat in cs_admin_paths) or \
-                            any(re.search(pat, route_path, re.IGNORECASE) for pat in cs_admin_paths)
-            if not is_admin_path:
-                continue
-
-            # Check annotations above (up to 15 lines for class + method level)
-            annotation_context = '\n'.join(self.source_lines[max(0, i - 15):i + 1])
-            has_auth_only = any(re.search(pat, annotation_context, re.MULTILINE) for pat in cs_auth_only)
-            has_role_check = any(re.search(pat, annotation_context) for pat in cs_role_attrs)
-
-            # Check method body for inline role checks
-            handler_end = min(len(self.source_lines), i + 12)
-            handler_body = '\n'.join(self.source_lines[i-1:handler_end])
-            has_inline_role = re.search(
-                r'User\.IsInRole|\.IsInRole\s*\(|ClaimTypes\.Role|'
-                r'\.HasClaim.*role|Policy|RequireRole|'
-                r'User\.HasClaim|Forbid\(\)',
-                handler_body, re.IGNORECASE
-            )
-
-            is_mutating = re.search(r'\[Http(?:Post|Put|Delete|Patch)', stripped)
-
-            if has_auth_only and not has_role_check and not has_inline_role:
-                sev = Severity.HIGH if is_mutating else Severity.MEDIUM
-                self._add_finding(
-                    i,
-                    "MFLAC - Admin endpoint with [Authorize] but no role check",
-                    VulnCategory.IDOR, sev, "HIGH",
-                    description=f"Endpoint '{route_path}' uses [Authorize] but lacks "
-                    f"[Authorize(Roles = \"Admin\")] or policy-based authorization. Any authenticated "
-                    f"user can access this admin function."
-                )
-            # No [Authorize] at all on an admin endpoint
-            elif not has_auth_only and not has_role_check and not has_inline_role:
-                has_any_authorize = re.search(
-                    r'\[Authorize', annotation_context
-                )
-                if not has_any_authorize:
-                    sev = Severity.CRITICAL if is_mutating else Severity.HIGH
-                    self._add_finding(
-                        i,
-                        "MFLAC - Admin endpoint without any [Authorize] attribute",
-                        VulnCategory.IDOR, sev, "HIGH",
-                        description=f"Endpoint '{route_path}' is an admin/privileged endpoint with NO "
-                        f"[Authorize] attribute. Any anonymous user can call it."
-                    )
-
-
 class ASPNetConfigAnalyzer:
     """
     ASP.NET web.config analyzer for security misconfigurations.
@@ -9731,7 +8311,6 @@ class RubyAnalyzer:
         self._check_calculation_sqli()
         self._check_destructive_sqli()
         self._check_path_traversal()
-        self._check_idor()
         return self.findings
 
     def _add_finding(self, line_num: int, vuln_name: str, category: VulnCategory,
@@ -10034,225 +8613,6 @@ class RubyAnalyzer:
                                                       "User-controlled path flows into send_file, allowing arbitrary file download.")
                                     break
 
-    def _check_idor(self):
-        """Check for Insecure Direct Object Reference / Broken Access Control vulnerabilities in Ruby."""
-
-        # Direct lookup patterns using user input (params)
-        direct_lookup_patterns = [
-            (r'\w+\.find\s*\(\s*params\s*\[\s*:[a-zA-Z_]*id\s*\]', "IDOR - Direct model find by user-supplied ID"),
-            (r'\w+\.find_by_id\s*\(\s*params\s*\[', "IDOR - Direct model find_by_id by user-supplied ID"),
-            (r'\w+\.find_by\s*\(\s*id:\s*params\s*\[', "IDOR - Direct model find_by by user-supplied ID"),
-            (r'\w+\.find_by!\s*\(\s*id:\s*params\s*\[', "IDOR - Direct model find_by! by user-supplied ID"),
-            (r'\w+\.where\s*\(\s*id:\s*params\s*\[', "IDOR - Direct model where by user-supplied ID"),
-            (r'\w+\.destroy\s*\(\s*params\s*\[\s*:[a-zA-Z_]*id\s*\]', "IDOR - Direct model destroy by user-supplied ID"),
-            (r'\w+\.delete\s*\(\s*params\s*\[\s*:[a-zA-Z_]*id\s*\]', "IDOR - Direct model delete by user-supplied ID"),
-            (r'\w+\.find\s*\(\s*params\s*\[\s*[\'"][a-zA-Z_]*id[\'"]\s*\]', "IDOR - Direct model find by user-supplied ID"),
-            # Hash/dict bracket access: hash[params[:id]] — Sinatra/generic Ruby
-            (r'\w+\s*\[\s*params\s*\[\s*:[a-zA-Z_]*id\s*\]', "IDOR - Direct hash lookup by user-supplied ID"),
-            (r'\w+\s*\[\s*params\s*\[\s*[\'"][a-zA-Z_]*id[\'"]\s*\]', "IDOR - Direct hash lookup by user-supplied ID"),
-        ]
-
-        # Mass assignment patterns
-        mass_assignment_patterns = [
-            (r'\w+\.update\s*\(\s*params\.permit!\s*\)', "IDOR - Mass assignment via params.permit!"),
-            (r'\w+\.update_attributes\s*\(\s*params\b', "IDOR - Mass assignment via update_attributes with raw params"),
-            (r'\w+\.create\s*\(\s*params\b(?!\.(?:require|permit))', "IDOR - Mass assignment via create with raw params"),
-            (r'\w+\.new\s*\(\s*params\b(?!\.(?:require|permit))', "IDOR - Mass assignment via new with raw params"),
-            (r'\w+\.assign_attributes\s*\(\s*params\b(?!\.(?:require|permit))', "IDOR - Mass assignment via assign_attributes with raw params"),
-            # params.require(:model).permit! — permits ALL attributes
-            (r'params\.require\s*\(\s*:\w+\s*\)\.permit!', "Mass Assignment - params.require().permit! permits all attributes"),
-            # .to_unsafe_h / .to_unsafe_hash — bypasses strong parameters
-            (r'params(?:\s*\[\s*:\w+\s*\])?\.to_unsafe_h', "Mass Assignment - to_unsafe_h bypasses strong parameters"),
-            (r'params(?:\s*\[\s*:\w+\s*\])?\.to_unsafe_hash', "Mass Assignment - to_unsafe_hash bypasses strong parameters"),
-        ]
-
-        # Same-line scoping patterns — if the line itself is scoped through current_user, skip
-        same_line_scoping = [
-            r'current_user\.\w+\.(find|where|find_by|find_by!|find_by_id|destroy|delete)',
-            r'settings\.current_user',
-        ]
-
-        # Narrow-context (±3 lines) ownership/authorization patterns
-        ownership_patterns = [
-            r'\.\w*(?:user|owner|creator|author)_id\s*[!=]==?\s*current_user',
-            r'\.\w*(?:user|owner|creator|author)\s*==\s*current_user',
-            r'current_user\.id\s*[!=]==?\s*\w+\.\w*(?:user|owner|creator)_id',
-            r'\bauthorize[!\s]', r'\bauthorize\b',
-            r'\bcan\?\s', r'\bcannot\?\s',
-            r'params\s*\[\s*:\w*id\s*\]\s*==\s*(?:settings\.)?current_user',
-            r'(?:settings\.)?current_user\w*\s*==\s*params\s*\[\s*:\w*id',
-            r'session\[:current_user',
-        ]
-
-        for i, line in enumerate(self.source_lines, 1):
-            stripped = line.strip()
-            if stripped.startswith('#'):
-                continue
-
-            # Check direct lookup patterns
-            for pattern, vuln_name in direct_lookup_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    # Check 1: Is the line itself scoped through current_user?
-                    if any(re.search(sp, line, re.IGNORECASE) for sp in same_line_scoping):
-                        continue
-
-                    # Check 2: Is there an ownership/authorization check within ±3 lines?
-                    narrow_start = max(0, i - 3)
-                    narrow_end = min(len(self.source_lines), i + 3)
-                    narrow_ctx = '\n'.join(
-                        l for l in self.source_lines[narrow_start:narrow_end]
-                        if not l.strip().startswith('#')
-                    )
-                    if any(re.search(op, narrow_ctx, re.IGNORECASE) for op in ownership_patterns):
-                        continue
-
-                    self._add_finding(i, vuln_name,
-                                      VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                                      description="ActiveRecord lookup uses user-supplied ID without authorization check. "
-                                      "Use current_user scoping, e.g., current_user.orders.find(params[:id]).")
-
-            # Check mass assignment patterns
-            for pattern, vuln_name in mass_assignment_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    self._add_finding(i, vuln_name,
-                                      VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                                      description="Raw params passed directly to model operation without strong parameters. "
-                                      "Use params.require(:model).permit(:field1, :field2) to whitelist fields.")
-
-        # =====================================================================
-        # MFLAC: Missing Function Level Access Control (Ruby/Rails)
-        # =====================================================================
-
-        # Auth-only before_actions
-        rb_auth_only = [
-            r'before_action\s+:authenticate_user!',
-            r'before_action\s+:require_login',
-            r'before_action\s+:require_authentication',
-            r'before_action\s+:verify_authenticated',
-        ]
-
-        # Role/admin before_actions
-        rb_role_actions = [
-            r'before_action\s+:require_admin',
-            r'before_action\s+:authorize_admin',
-            r'before_action\s+:admin_only',
-            r'before_action\s+:check_admin',
-            r'before_action\s+:ensure_admin',
-            r'before_action\s+:require_role',
-            r'before_action\s+:authorize!?\b',
-            r'authorize\s+',  # Pundit authorize
-            r'can\?\s+',      # CanCanCan
-        ]
-
-        # Look for admin controller classes with auth-only guards
-        in_admin_controller = False
-        has_class_auth_only = False
-        has_class_role_check = False
-
-        for i, line in enumerate(self.source_lines, 1):
-            stripped = line.strip()
-
-            # Detect admin controller class definitions
-            class_match = re.search(r'class\s+(\w+)Controller\s*<', stripped)
-            if class_match:
-                controller_name = class_match.group(1).lower()
-                in_admin_controller = any(
-                    kw in controller_name for kw in
-                    ['admin', 'manage', 'internal', 'superadmin', 'moderator', 'dashboard']
-                )
-                has_class_auth_only = False
-                has_class_role_check = False
-
-                # Scan forward for before_action declarations (i is 1-based, source_lines is 0-based)
-                for j in range(i - 1, min(len(self.source_lines), i + 14)):
-                    fwd = self.source_lines[j]
-                    if any(re.search(pat, fwd) for pat in rb_auth_only):
-                        has_class_auth_only = True
-                    if any(re.search(pat, fwd) for pat in rb_role_actions):
-                        has_class_role_check = True
-
-                if in_admin_controller and has_class_auth_only and not has_class_role_check:
-                    self._add_finding(
-                        i,
-                        "MFLAC - Admin controller with auth-only before_action",
-                        VulnCategory.IDOR, Severity.HIGH, "HIGH",
-                        description=f"Controller '{class_match.group(1)}Controller' uses "
-                        f"before_action :authenticate_user! but lacks admin role verification. "
-                        f"Any authenticated user can access all actions in this admin controller."
-                    )
-
-        # =====================================================================
-        # MFLAC: Sinatra route-based detection
-        # =====================================================================
-
-        rb_sinatra_admin_paths = [
-            r'/admin', r'/api/admin', r'/manage', r'/management',
-            r'/internal', r'/superadmin', r'/moderator',
-            r'/dashboard/admin',
-        ]
-
-        rb_sinatra_auth_patterns = [
-            r'authenticate!', r'require_login', r'logged_in\?',
-            r'session\[:user', r'session\[:admin',
-            r'current_user', r'authorized\?', r'halt\s+401',
-            r'redirect.*login', r'env\[.REMOTE_USER.\]',
-        ]
-
-        rb_sinatra_role_patterns = [
-            r'\.role\s*[!=]==?\s*[\'"]admin', r'admin\?',
-            r'current_user\.admin', r'is_admin',
-            r'require_admin', r'authorize!',
-            r'\[:role\]\s*[!=]==?\s*[\'"]admin',
-        ]
-
-        for i, line in enumerate(self.source_lines, 1):
-            stripped = line.strip()
-            # Match Sinatra route definitions: get '/admin' do
-            sinatra_match = re.search(
-                r'(?:get|post|put|delete|patch)\s+[\'"]([^\'"]+)[\'"]\s+do',
-                stripped
-            )
-            if not sinatra_match:
-                continue
-
-            route_path = sinatra_match.group(1)
-            is_admin = any(re.search(pat, route_path, re.IGNORECASE) for pat in rb_sinatra_admin_paths)
-            if not is_admin:
-                continue
-
-            # Check handler body for auth/role checks (stop at 'end' keyword)
-            handler_end = min(len(self.source_lines), i + 15)
-            for end_idx in range(i, handler_end):
-                if self.source_lines[end_idx].strip() == 'end':
-                    handler_end = end_idx + 1
-                    break
-            handler_body = '\n'.join(self.source_lines[i - 1:handler_end])
-
-            has_auth = any(re.search(pat, handler_body, re.IGNORECASE) for pat in rb_sinatra_auth_patterns)
-            has_role = any(re.search(pat, handler_body, re.IGNORECASE) for pat in rb_sinatra_role_patterns)
-
-            is_mutating = stripped.startswith(('post ', 'put ', 'delete ', 'patch '))
-
-            if has_auth and not has_role:
-                sev = Severity.HIGH if is_mutating else Severity.MEDIUM
-                self._add_finding(
-                    i,
-                    "MFLAC - Admin route with auth-only guard",
-                    VulnCategory.IDOR, sev, "HIGH",
-                    description=f"Sinatra route '{route_path}' checks authentication but lacks "
-                    f"admin role verification. Any authenticated user can access this admin endpoint."
-                )
-            elif not has_auth and not has_role:
-                sev = Severity.CRITICAL if is_mutating else Severity.HIGH
-                self._add_finding(
-                    i,
-                    "MFLAC - Admin route without any auth check",
-                    VulnCategory.IDOR, sev, "HIGH",
-                    description=f"Sinatra route '{route_path}' is an admin endpoint with NO "
-                    f"authentication or authorization. Any anonymous user can access it."
-                )
-
-
 class ASTScanner:
     """Main scanner class that orchestrates AST-based analysis."""
 
@@ -10408,7 +8768,6 @@ class ASTScanner:
         # 2nd-order detection for pandas df.query()/eval() with DB-sourced values
         tracker._track_database_sources()
         tracker._check_pandas_query_injection()
-        tracker._check_idor()
 
         return self._filter_findings(tracker.findings)
 

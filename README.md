@@ -106,8 +106,6 @@ Tracked sources include `repo.findById()`, `cursor.fetchone()`, `Model.findOne()
 | SSRF | Yes | - | All 7 |
 | SSTI | Yes | - | All 7 |
 | Insecure Deserialization | Yes | Double-unserialize | All 7 |
-| IDOR | Yes | - | All 7 |
-| MFLAC | Yes | - | All 7 |
 | Expression Language (SpEL, OGNL, MVEL, EL) | Yes | - | Java |
 | Reflection Injection | Yes | - | Java |
 
@@ -163,7 +161,7 @@ python3 vulnhunter.py target/ [options]
 
 ### java-treesitter.py - Java AST Scanner
 
-Deep Java analysis using [tree-sitter](https://tree-sitter.github.io/) with **per-method taint scoping**. Covers 15 vulnerability categories including JNDI injection, mass assignment, and reflection injection. Framework-agnostic (Spring, Struts2, Servlets, plain Java).
+Deep Java analysis using [tree-sitter](https://tree-sitter.github.io/) with **per-method taint scoping**. Covers 13 vulnerability categories including JNDI injection, mass assignment, and reflection injection. Framework-agnostic (Spring, Struts2, Servlets, plain Java).
 
 ```bash
 pip3 install tree-sitter tree-sitter-java
