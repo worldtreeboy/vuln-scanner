@@ -2131,7 +2131,7 @@ def output_rich(findings: List[Finding], target: str, file_count: int,
 
 def output_text_plain(findings: List[Finding], file_path: str):
     """Output findings in plain text format (for file output)."""
-    with open(file_path, 'w') as out:
+    with open(file_path, 'w', encoding='utf-8') as out:
         for f in findings:
             out.write(f"\n{'='*70}\n")
             out.write(f"  [{f.severity.value}] [{f.confidence}] {f.vulnerability_name}\n")
@@ -2206,7 +2206,7 @@ def output_json(findings: List[Finding], file_path: str = None):
 
     json_str = json.dumps(data, indent=2)
     if file_path:
-        with open(file_path, 'w') as f:
+        with open(file_path, 'w', encoding='utf-8') as f:
             f.write(json_str)
     else:
         print(json_str)

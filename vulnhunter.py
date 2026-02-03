@@ -10553,7 +10553,7 @@ class ASTScanner:
             output = self._format_text_report()
 
         if output_file:
-            with open(output_file, 'w') as f:
+            with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(output)
             console.print(f"\n[bold green]Report saved to {output_file}[/bold green]")
         else:
@@ -10942,7 +10942,7 @@ def main():
         # Save to file if requested
         if args.output_file:
             output = scanner._format_text_report()
-            with open(args.output_file, 'w') as fh:
+            with open(args.output_file, 'w', encoding='utf-8') as fh:
                 fh.write(output)
             console.print(f"\n[bold green]Report saved to {args.output_file}[/bold green]")
 

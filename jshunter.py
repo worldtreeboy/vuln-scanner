@@ -2614,7 +2614,7 @@ def main():
     report = scanner.generate_report(args.output)
 
     if args.output_file:
-        with open(args.output_file, 'w') as f:
+        with open(args.output_file, 'w', encoding='utf-8') as f:
             f.write(report)
         print(f"[+] Report saved to {args.output_file}")
     else:
