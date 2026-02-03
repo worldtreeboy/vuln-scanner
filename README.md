@@ -420,6 +420,9 @@ VulnHunter detects **Insecure Direct Object Reference (IDOR)** and **Missing Fun
 | **Hash/dict access by user input** | Python, JS, Ruby, PHP | `invoices.get(invoice_id)`, `users[params[:id]]` |
 | **Collection lookup without ownership** | C#, Java | `_records.Find(r => r.Id == id)`, `documents.get(docId)` |
 | **Mass assignment** | All | `Model.update(req.body)`, `User(**request.data)`, `params.permit!` |
+| **Indirect taint to ORM lookup** | Python, PHP | `user_id = request.args.get('id'); User.objects.get(pk=user_id)` |
+| **Indirect taint to PDO/Laravel** | PHP | `$id = $request->input('id'); Item::find($id)` |
+| **EntityManager.find** | Java | `em.find(User.class, id)` with `@PathVariable` |
 | **Destructuring to DB lookup** | JS/TS | `const { userId } = req.params; data[userId]` |
 
 ### MFLAC Patterns Detected
@@ -435,12 +438,15 @@ VulnHunter detects **Insecure Direct Object Reference (IDOR)** and **Missing Fun
 
 ### False Positive Reduction
 
-- Ownership checks detected (e.g., `record.OwnerId != currentUserId`, `invoice['user_id'] != get_current_user()`)
-- Scoped queries recognized (e.g., `current_user.orders.find(...)`)
+- Ownership checks detected (e.g., `record.OwnerId != currentUserId`, `invoice['user_id'] != get_current_user()`, `Forbid()`)
+- Scoped queries recognized (e.g., `current_user.orders.find(...)`, `Order.find({ userId: req.user.id })`)
 - Role checks in method body suppress MFLAC (e.g., `User.IsInRole("Admin")`, `user['role'] == 'admin'`)
-- Function definitions excluded from auth context matching
-- String literals in route attributes excluded from brace-depth analysis
-- Comment lines excluded from auth context (prevents `// no check for getOwnerId()` from suppressing findings)
+- Function definitions excluded from auth context matching (Python)
+- Comment lines excluded from auth context (Python, Java) — prevents `// no check for getOwnerId()` from suppressing findings
+- String literals in route attributes excluded from brace-depth analysis (C#)
+- Class-level `[Route]` combined with method `[Http*]` for admin path detection (C#)
+- PHP `abort(403)`, `!= auth()->id()` recognized as ownership verification
+- `req.user.*` excluded from NoSQL injection patterns (session values, not user input)
 
 > **Note:** IDOR and MFLAC detection is **not comprehensive**. These are pattern-based heuristics that catch common anti-patterns but may miss complex authorization logic, custom middleware chains, or framework-specific security configurations. For thorough access control testing, combine static analysis with dynamic testing (e.g., Burp Suite, OWASP ZAP) and manual code review.
 

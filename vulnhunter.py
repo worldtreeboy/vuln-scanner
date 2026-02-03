@@ -2191,10 +2191,11 @@ class PythonTaintTracker(ast.NodeVisitor):
 
             context_start = max(0, i - 8)
             context_end = min(len(self.source_lines), i + 8)
-            # Exclude function definitions from context — a `def get_current_user():`
-            # line is a definition, not an actual auth/ownership check call
+            # Exclude function definitions and comments from context — a `def get_current_user():`
+            # line is a definition, not an actual auth/ownership check call.
+            # Comments like "# FP1: Has ownership check via get_current_user()" are also not checks.
             context_lines = [l for l in self.source_lines[context_start:context_end]
-                             if not l.strip().startswith('def ')]
+                             if not l.strip().startswith('def ') and not l.strip().startswith('#')]
             context = '\n'.join(context_lines)
 
             has_auth_context = any(re.search(pat, context) for pat in auth_context_patterns)
@@ -2279,6 +2280,40 @@ class PythonTaintTracker(ast.NodeVisitor):
                     self._add_finding_simple(i, vuln_name,
                                       VulnCategory.IDOR, Severity.HIGH, "HIGH",
                                       "Request parameter used directly in data lookup without authorization check.")
+
+            # ---- ORM lookup with tainted variable as named argument ----
+            for tvar, (tline, tsource) in tainted_locals.items():
+                orm_tainted_pats = [
+                    (rf'\.objects\.get\s*\(\s*(?:pk|id)\s*=\s*{re.escape(tvar)}\b', f"IDOR - Django ORM lookup with tainted variable '{tvar}'"),
+                    (rf'\.objects\.filter\s*\(\s*(?:pk|id)\s*=\s*{re.escape(tvar)}\b', f"IDOR - Django ORM filter with tainted variable '{tvar}'"),
+                    (rf'\.query\.get\s*\(\s*{re.escape(tvar)}\s*\)', f"IDOR - SQLAlchemy query.get() with tainted variable '{tvar}'"),
+                    (rf'\.query\.filter_by\s*\(\s*id\s*=\s*{re.escape(tvar)}\b', f"IDOR - SQLAlchemy filter_by with tainted variable '{tvar}'"),
+                ]
+                for sink_pat, vuln_name in orm_tainted_pats:
+                    if re.search(sink_pat, line):
+                        if i == tline:
+                            continue
+                        if has_auth_context and has_ownership:
+                            continue
+                        self._add_finding_simple(i, vuln_name,
+                                          VulnCategory.IDOR, Severity.HIGH, "HIGH",
+                                          f"Variable '{tvar}' (from {tsource}, line {tline}) used in ORM lookup "
+                                          f"without authorization check. Verify the requesting user owns the resource.")
+
+            # ---- ORM lookup with route parameter as named argument ----
+            for rparam in current_func_route_params:
+                orm_route_pats = [
+                    (rf'\.objects\.get\s*\(\s*(?:pk|id)\s*=\s*{re.escape(rparam)}\b', f"IDOR - Django ORM lookup by route parameter '{rparam}'"),
+                    (rf'\.objects\.filter\s*\(\s*(?:pk|id)\s*=\s*{re.escape(rparam)}\b', f"IDOR - Django ORM filter by route parameter '{rparam}'"),
+                    (rf'\.query\.get\s*\(\s*{re.escape(rparam)}\s*\)', f"IDOR - SQLAlchemy query.get() by route parameter '{rparam}'"),
+                ]
+                for sink_pat, vuln_name in orm_route_pats:
+                    if re.search(sink_pat, line):
+                        if has_auth_context and has_ownership:
+                            continue
+                        self._add_finding_simple(i, vuln_name,
+                                          VulnCategory.IDOR, Severity.HIGH, "HIGH",
+                                          f"Route parameter '{rparam}' used in ORM lookup without authorization check.")
 
             # ---- Mass assignment patterns ----
             for pattern, vuln_name in mass_assignment_patterns:
@@ -3603,8 +3638,8 @@ class JavaScriptAnalyzer:
         """Check for NoSQL injection patterns - including evasion techniques."""
         # High confidence patterns - direct user input in query
         high_confidence_patterns = [
-            (r'\.find\s*\(\s*\{[^}]*:\s*req\.', "NoSQL Injection - MongoDB find with request"),
-            (r'\.findOne\s*\(\s*\{[^}]*:\s*req\.', "NoSQL Injection - MongoDB findOne with request"),
+            (r'\.find\s*\(\s*\{[^}]*:\s*req\.(?:body|query|params|cookies)', "NoSQL Injection - MongoDB find with request"),
+            (r'\.findOne\s*\(\s*\{[^}]*:\s*req\.(?:body|query|params|cookies)', "NoSQL Injection - MongoDB findOne with request"),
             (r'\$where\s*:\s*(?:req\.|user|input|\w+\s*\+)', "NoSQL Injection - $where with user input"),
             (r'\$regex\s*:\s*req\.', "NoSQL Injection - $regex with request data"),
             # Evasion: Dynamic object key from user input
@@ -6123,7 +6158,7 @@ class JavaAnalyzer:
             (r'repository\.getReferenceById\s*\(\s*(\w+)\s*\)', "IDOR - Direct repository lookup by user-supplied ID"),
             (r'repository\.getOne\s*\(\s*(\w+)\s*\)', "IDOR - Direct repository lookup by user-supplied ID"),
             (r'\.findById\s*\(\s*(\w+)\s*\)', "IDOR - Direct entity lookup by ID"),
-            (r'entityManager\.find\s*\(\s*\w+\.class\s*,\s*(\w+)\s*\)', "IDOR - Direct EntityManager lookup by user-supplied ID"),
+            (r'\w+\.find\s*\(\s*\w+\.class\s*,\s*(\w+)\s*\)', "IDOR - Direct EntityManager lookup by user-supplied ID"),
             (r'session\.get\s*\(\s*\w+\.class\s*,\s*(\w+)\s*\)', "IDOR - Direct Hibernate session lookup by user-supplied ID"),
             # Generic collection/map lookup: map.get(id), list.get(index)
             (r'\w+\.get\s*\(\s*(\w+)\s*\)', "IDOR - Direct data lookup by user-supplied ID"),
@@ -7785,6 +7820,9 @@ class PHPAnalyzer:
             r'Auth::id\(\)\s*[!=]==?',
             r'auth\(\)->id\(\)\s*[!=]==?',
             r'->user\(\)->id\s*[!=]==?',
+            r'[!=]==?\s*auth\(\)->id\(\)',
+            r'[!=]==?\s*Auth::id\(\)',
+            r'abort\s*\(\s*403\s*\)',
             # Role-based authorization (e.g., $role == 'admin', $user['role'] == 'admin')
             r'\$\w*role\w*\s*[!=]==?\s*[\'"]admin[\'"]',
             r'\[.role.\]\s*[!=]==?\s*[\'"]admin[\'"]',
@@ -7841,8 +7879,11 @@ class PHPAnalyzer:
                                       VulnCategory.IDOR, Severity.MEDIUM, "MEDIUM",
                                       description="Destructive route (DELETE/PUT/PATCH) appears to lack auth middleware.")
 
-            # Indirect IDOR: variable assigned from $_GET/$_POST then used as array key or in DB lookup
+            # Indirect IDOR: variable assigned from $_GET/$_POST/$request->input() then used
             input_match = re.search(r'\$(\w+)\s*=\s*\$(?:_GET|_POST|_REQUEST)\s*\[\s*[\'"](\w+)[\'"]\s*\]', line)
+            if not input_match:
+                # Also capture $request->input('key'), $request->get('key'), $request->query('key')
+                input_match = re.search(r'\$(\w+)\s*=\s*\$(?:request|req)\s*->\s*(?:input|get|query)\s*\(\s*[\'"](\w+)[\'"]', line)
             if input_match:
                 var_name = input_match.group(1)
                 param_name = input_match.group(2)
@@ -7859,6 +7900,7 @@ class PHPAnalyzer:
                         rf'->delete\s*\(\s*\${re.escape(var_name)}\s*\)',
                         rf'->destroy\s*\(\s*\${re.escape(var_name)}\s*\)',
                         rf'WHERE\s+\w*id\s*=.*\${re.escape(var_name)}',
+                        rf'->execute\s*\(\s*\[\s*\${re.escape(var_name)}',
                     ]
                     for iap in indirect_access_pats:
                         if re.search(iap, fwd_line, re.IGNORECASE):
@@ -9133,6 +9175,7 @@ class CSharpAnalyzer:
             r'GetUserId\(\)', r'IsOwner', r'CheckOwnership',
             r'IAuthorizationService', r'\.AuthorizeAsync\(',
             r'\[AllowAnonymous\]',
+            r'Forbid\(', r'\.OwnerId', r'GetCurrentUser',
         ]
 
         for i, line in enumerate(self.source_lines, 1):
@@ -9260,14 +9303,25 @@ class CSharpAnalyzer:
             stripped = line.strip()
             # Match ASP.NET route attributes
             route_match = re.search(
-                r'\[(?:Http(?:Get|Post|Put|Delete|Patch)|Route)\s*\(\s*["\']([^"\']+)["\']',
+                r'\[Http(?:Get|Post|Put|Delete|Patch)\s*\(\s*["\']([^"\']+)["\']',
                 stripped
             )
             if not route_match:
                 continue
 
             route_path = route_match.group(1)
-            is_admin_path = any(re.search(pat, route_path, re.IGNORECASE) for pat in cs_admin_paths)
+            # Also combine with class-level [Route] to get full path
+            class_route = ''
+            for back in range(i - 2, max(0, i - 30) - 1, -1):
+                class_route_match = re.search(r'\[Route\s*\(\s*["\']([^"\']+)["\']', self.source_lines[back])
+                if class_route_match:
+                    class_route = class_route_match.group(1)
+                    break
+                if re.search(r'^\s*(?:namespace|using)\s', self.source_lines[back]):
+                    break
+            combined_path = (class_route + '/' + route_path).lower() if class_route else route_path.lower()
+            is_admin_path = any(re.search(pat, combined_path, re.IGNORECASE) for pat in cs_admin_paths) or \
+                            any(re.search(pat, route_path, re.IGNORECASE) for pat in cs_admin_paths)
             if not is_admin_path:
                 continue
 
