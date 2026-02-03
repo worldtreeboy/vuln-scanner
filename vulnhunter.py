@@ -15,7 +15,6 @@ Supported Languages:
 - Java/Kotlin/Scala (.java, .kt, .scala) - Regex-enhanced with taint tracking
 - PHP (.php, .phtml) - Regex-enhanced with taint tracking
 - C# (.cs) - Regex-enhanced with taint tracking
-- Go (.go) - Regex-enhanced with taint tracking
 - Ruby (.rb, .erb) - Regex-enhanced with taint tracking
 
 Vulnerability Categories:
@@ -2653,6 +2652,9 @@ class JavaScriptAnalyzer:
             # IntelliSense files (VS tooling, not runtime code)
             r'\.intellisense\.js$',
             r'-vsdoc\.js$',
+            # Google API
+            r'jsapi\.js$',
+            r'google-loader\.js$',
         ]
 
         import os
@@ -8364,6 +8366,38 @@ class CSharpAnalyzer:
                                               VulnCategory.SQL_INJECTION, Severity.HIGH, "HIGH", var,
                                               "SQL query built via string.Format with user-controlled value.")
 
+            # EF Core: FromSql / FromSqlRaw with interpolated or concatenated string variable
+            if re.search(r'\.FromSql(?:Raw)?\s*\(', line):
+                var_match = re.search(r'\.FromSql(?:Raw)?\s*\(\s*(\w+)\s*[,\)]', line)
+                if var_match:
+                    var_name = var_match.group(1)
+                    for back in range(max(0, i - 10), i):
+                        back_line = self.source_lines[back]
+                        if re.search(rf'\b{re.escape(var_name)}\b\s*=', back_line):
+                            if '$"' in back_line or '$@"' in back_line or re.search(r'["\'].*\+|\+.*["\']', back_line) or re.search(r'[Ss]tring\.Format', back_line):
+                                if re.search(sql_keywords, back_line, re.IGNORECASE):
+                                    self._add_finding(i, "SQL Injection - EF Core FromSql with interpolated string",
+                                                      VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH",
+                                                      description="String interpolation used to build SQL query passed to FromSql(). "
+                                                      "Use parameterized queries or FromSqlInterpolated().")
+                                    break
+
+            # EF Core: ExecuteSqlRaw / ExecuteSqlCommand with interpolated string variable
+            if re.search(r'\.ExecuteSql(?:Raw|Command)?\s*\(', line):
+                var_match = re.search(r'\.ExecuteSql(?:Raw|Command)?\s*\(\s*(\w+)\s*[,\)]', line)
+                if var_match:
+                    var_name = var_match.group(1)
+                    for back in range(max(0, i - 10), i):
+                        back_line = self.source_lines[back]
+                        if re.search(rf'\b{re.escape(var_name)}\b\s*=', back_line):
+                            if '$"' in back_line or '$@"' in back_line or re.search(r'["\'].*\+|\+.*["\']', back_line) or re.search(r'[Ss]tring\.Format', back_line):
+                                if re.search(sql_keywords, back_line, re.IGNORECASE):
+                                    self._add_finding(i, "SQL Injection - EF Core ExecuteSql with interpolated string",
+                                                      VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH",
+                                                      description="String interpolation used to build SQL query passed to ExecuteSql(). "
+                                                      "Use parameterized queries.")
+                                    break
+
     def _check_command_injection(self):
         # Common system tools used in "helper" wrapper methods
         system_tools = r'(?:ping|ipconfig|ifconfig|nslookup|tracert|traceroute|netstat|whoami|hostname|' \
@@ -8758,6 +8792,22 @@ class CSharpAnalyzer:
                     self._add_finding(i, "Code Injection - Activator.CreateInstance with tainted type",
                                       VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
                                       "User-controlled type name in Activator.CreateInstance enables arbitrary object instantiation.")
+
+            # Deserialization with user-controlled type: Type.GetType(var) -> XmlSerializer
+            if re.search(r'Type\.GetType\s*\(', line):
+                # Check if the argument is NOT a string literal (i.e., it's a variable = user-controlled)
+                type_arg = re.search(r'Type\.GetType\s*\(\s*(\w+)\s*\)', line)
+                if type_arg:
+                    arg_name = type_arg.group(1)
+                    # Check if arg comes from user input (XML attribute, request param, etc.)
+                    back_context = '\n'.join(self.source_lines[max(0, i - 10):i])
+                    if re.search(rf'\b{re.escape(arg_name)}\b\s*=\s*.*(?:GetAttribute|Request|params|Query|Body|Form|Headers|Cookies|\.Value)', back_context):
+                        fwd_context = '\n'.join(self.source_lines[i - 1:min(len(self.source_lines), i + 5)])
+                        if re.search(r'XmlSerializer|Deserialize|Activator\.CreateInstance|JsonConvert', fwd_context):
+                            self._add_finding(i, "Deserialization - User-controlled type in Type.GetType",
+                                              VulnCategory.DESERIALIZATION, Severity.CRITICAL, "HIGH",
+                                              description="Type.GetType() with user-controlled type name enables "
+                                              "deserialization of arbitrary types, potentially leading to RCE.")
 
     def _check_xxe(self):
         for i, line in enumerate(self.source_lines, 1):
@@ -9160,6 +9210,8 @@ class CSharpAnalyzer:
             (r'\w+\.FirstOrDefault\s*\(\s*\w+\s*=>\s*\w+\.Id\s*==\s*id\s*\)', "IDOR - Direct LINQ lookup by user-supplied ID"),
             (r'\w+\.SingleOrDefault\s*\(\s*\w+\s*=>\s*\w+\.Id\s*==\s*id\s*\)', "IDOR - Direct LINQ lookup by user-supplied ID"),
             (r'\w+\.First\s*\(\s*\w+\s*=>\s*\w+\.Id\s*==\s*id\s*\)', "IDOR - Direct LINQ lookup by user-supplied ID"),
+            # Where(... == someVar).FirstOrDefault() / .SingleOrDefault() / .First() — also on continuation lines
+            (r'\.?Where\s*\(\s*\w+\s*=>\s*\w+\.\w+\s*==\s*\w+', "IDOR - LINQ Where lookup by user-supplied ID"),
         ]
 
         # Mass assignment patterns
@@ -9203,11 +9255,17 @@ class CSharpAnalyzer:
             # Check direct lookup patterns
             for pattern, vuln_name in direct_lookup_patterns:
                 if re.search(pattern, line, re.IGNORECASE):
-                    # Check if 'id' comes from route/query parameter
+                    # Check if value comes from user input (route, query, cookies, etc.)
                     param_context = '\n'.join(self.source_lines[max(0, method_start):i])
                     is_user_input = bool(re.search(r'\[FromRoute\]|\[FromQuery\]|HttpGet.*\{id\}|HttpDelete.*\{id\}|HttpPut.*\{id\}', param_context))
                     if not is_user_input:
                         is_user_input = 'id' in self.tainted_vars
+                    if not is_user_input:
+                        is_user_input = bool(re.search(r'Request\.(?:Query|Form|Cookies|Headers)\s*\[|HttpContext\.Request', param_context))
+                    if not is_user_input:
+                        # Fallback: broader context check (method_start scan may stop too early at if-block braces)
+                        broad_context = '\n'.join(self.source_lines[max(0, i - 25):i])
+                        is_user_input = bool(re.search(r'Request\.(?:Query|Form|Cookies|Headers)\s*\[|HttpContext\.Request\.(?:Query|Form|Cookies|Headers)', broad_context))
 
                     # Narrower auth check: use brace-depth counting to find method body end
                     # Skip braces inside string literals (e.g. {id} in route attributes)
@@ -9533,339 +9591,6 @@ class ASPNetConfigAnalyzer:
                 )
 
 
-class GoAnalyzer:
-    """
-    Go analyzer with taint tracking for common vulnerabilities.
-    """
-
-    def __init__(self, source_code: str, file_path: str):
-        self.source_code = source_code
-        self.source_lines = source_code.splitlines()
-        self.file_path = file_path
-        self.findings: List[Finding] = []
-        self.tainted_vars: Dict[str, int] = {}
-
-        self._identify_taint_sources()
-        self._track_variable_assignments()
-
-    def _identify_taint_sources(self):
-        """Identify HTTP request data and function parameters as taint sources."""
-        taint_patterns = [
-            r'r\.URL\.Query\(\)', r'r\.FormValue\s*\(', r'r\.PostFormValue\s*\(',
-            r'r\.Header\.Get\s*\(', r'r\.Body', r'c\.Query\s*\(', r'c\.Param\s*\(',
-            r'c\.PostForm\s*\(', r'c\.GetHeader\s*\(',
-            r'os\.Args', r'flag\.\w+\s*\(',
-        ]
-
-        for i, line in enumerate(self.source_lines, 1):
-            for pattern in taint_patterns:
-                if re.search(pattern, line):
-                    match = re.search(r'(\w+)\s*:?=', line)
-                    if match:
-                        self.tainted_vars[match.group(1)] = i
-
-        # Function parameters
-        for i, line in enumerate(self.source_lines, 1):
-            match = re.search(r'func\s+(?:\([^)]+\)\s+)?\w+\s*\(([^)]+)\)', line)
-            if match:
-                params = match.group(1)
-                for param in re.findall(r'(\w+)\s+\w+', params):
-                    self.tainted_vars[param] = i
-
-    def _track_variable_assignments(self):
-        for i, line in enumerate(self.source_lines, 1):
-            if line.strip().startswith('//'):
-                continue
-            match = re.search(r'(\w+)\s*:?=\s*(.+)', line)
-            if match:
-                var_name = match.group(1)
-                rhs = match.group(2)
-                for tainted in list(self.tainted_vars.keys()):
-                    if re.search(rf'\b{re.escape(tainted)}\b', rhs):
-                        self.tainted_vars[var_name] = i
-                        break
-
-    def _is_tainted(self, line: str) -> Tuple[bool, Optional[str]]:
-        # Remove string literals to avoid matching variable names inside strings
-        line_clean = re.sub(r'"[^"\\]*(?:\\.[^"\\]*)*"', '""', line)
-        line_clean = re.sub(r'`[^`]*`', '``', line_clean)  # Go raw strings
-
-        for var in self.tainted_vars:
-            if re.search(rf'\b{re.escape(var)}\b', line_clean):
-                return True, var
-        return False, None
-
-    def get_line_content(self, lineno: int) -> str:
-        if 1 <= lineno <= len(self.source_lines):
-            return self.source_lines[lineno - 1]
-        return ""
-
-    def analyze(self) -> List[Finding]:
-        self._check_sql_injection()
-        self._check_command_injection()
-        self._check_ssrf()
-        self._check_ssti()
-        self._check_idor()
-        return self.findings
-
-    def _add_finding(self, line_num: int, vuln_name: str, category: VulnCategory,
-                     severity: Severity, confidence: str, taint_var: Optional[str] = None,
-                     description: str = ""):
-        taint_chain = []
-        if taint_var and taint_var in self.tainted_vars:
-            taint_chain = [f"tainted: {taint_var} (line {self.tainted_vars[taint_var]})"]
-
-        self.findings.append(Finding(
-            file_path=self.file_path, line_number=line_num, col_offset=0,
-            line_content=self.get_line_content(line_num),
-            vulnerability_name=vuln_name, category=category,
-            severity=severity, confidence=confidence,
-            taint_chain=taint_chain, description=description,
-        ))
-
-    def _check_sql_injection(self):
-        sql_patterns = [
-            r'\.Query\s*\(', r'\.QueryRow\s*\(', r'\.Exec\s*\(',
-            r'\.QueryContext\s*\(', r'\.ExecContext\s*\(',
-        ]
-        sql_keywords = r'(?:SELECT|INSERT|UPDATE|DELETE|DROP)'
-
-        for i, line in enumerate(self.source_lines, 1):
-            if line.strip().startswith('//'):
-                continue
-
-            for pattern in sql_patterns:
-                if re.search(pattern, line):
-                    is_tainted, taint_var = self._is_tainted(line)
-                    # Check for string concatenation or fmt.Sprintf
-                    has_concat = '+' in line or 'fmt.Sprintf' in line or 'fmt.Sprint' in line
-
-                    if is_tainted and has_concat:
-                        self._add_finding(i, "SQL Injection - Query with tainted data",
-                                          VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
-                                          "User input concatenated in SQL query.")
-
-            if 'fmt.Sprintf' in line and re.search(sql_keywords, line, re.IGNORECASE):
-                is_tainted, taint_var = self._is_tainted(line)
-                if is_tainted:
-                    self._add_finding(i, "SQL Injection - fmt.Sprintf with SQL and tainted data",
-                                      VulnCategory.SQL_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
-                                      "User input in fmt.Sprintf SQL query.")
-
-    def _check_command_injection(self):
-        for i, line in enumerate(self.source_lines, 1):
-            if line.strip().startswith('//'):
-                continue
-
-            if re.search(r'exec\.Command\s*\(', line):
-                is_tainted, taint_var = self._is_tainted(line)
-                if is_tainted:
-                    self._add_finding(i, "Command Injection - exec.Command with tainted data",
-                                      VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
-                                      "User input passed to exec.Command().")
-
-                # Check for shell execution pattern: exec.Command("sh", "-c", cmd)
-                context = '\n'.join(self.source_lines[i-1:min(len(self.source_lines), i+3)])
-                shell_pattern = re.search(
-                    r'exec\.Command\s*\(\s*["`](?:/bin/sh|/bin/bash|sh|bash|cmd)["`]\s*,\s*["`](?:-c|/c)["`]',
-                    context
-                )
-                if shell_pattern:
-                    if is_tainted:
-                        self._add_finding(i, "Command Injection - Shell execution pattern with tainted input",
-                                          VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
-                                          "exec.Command with shell -c and user-controlled command.")
-                    else:
-                        self._add_finding(i, "Command Injection - Shell execution pattern",
-                                          VulnCategory.COMMAND_INJECTION, Severity.HIGH, "HIGH",
-                                          description="exec.Command with sh -c pattern - review carefully.")
-
-            if re.search(r'os\.StartProcess\s*\(', line):
-                is_tainted, taint_var = self._is_tainted(line)
-                if is_tainted:
-                    self._add_finding(i, "Command Injection - os.StartProcess with tainted data",
-                                      VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
-                                      "User input passed to os.StartProcess().")
-
-            # reflect.Value.Call for dynamic method invocation
-            if re.search(r'reflect\..*\.Call\s*\(', line):
-                context = '\n'.join(self.source_lines[max(0, i-10):i+1])
-                if re.search(r'exec|Command|Process|system|shell', context, re.IGNORECASE):
-                    is_tainted, taint_var = self._is_tainted(line)
-                    if is_tainted:
-                        self._add_finding(i, "Command Injection - Reflect Call with tainted input",
-                                          VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, "HIGH", taint_var,
-                                          "Reflection call to command execution with user input.")
-                    else:
-                        self._add_finding(i, "Command Injection - Reflect Call (evasion)",
-                                          VulnCategory.COMMAND_INJECTION, Severity.HIGH, "MEDIUM",
-                                          description="Reflection call near command execution - evasion technique.")
-
-    def _check_ssrf(self):
-        for i, line in enumerate(self.source_lines, 1):
-            if line.strip().startswith('//'):
-                continue
-
-            if re.search(r'http\.Get\s*\(|http\.Post\s*\(|http\.NewRequest\s*\(', line):
-                is_tainted, taint_var = self._is_tainted(line)
-                if is_tainted:
-                    self._add_finding(i, "SSRF - HTTP request with tainted URL",
-                                      VulnCategory.SSRF, Severity.HIGH, "HIGH", taint_var,
-                                      "User-controlled URL in HTTP request.")
-
-    def _check_ssti(self):
-        for i, line in enumerate(self.source_lines, 1):
-            if line.strip().startswith('//'):
-                continue
-
-            if re.search(r'template\.New\s*\([^)]*\)\.Parse\s*\(', line):
-                is_tainted, taint_var = self._is_tainted(line)
-                if is_tainted:
-                    self._add_finding(i, "SSTI - Template parsing with tainted data",
-                                      VulnCategory.SSTI, Severity.HIGH, "HIGH", taint_var,
-                                      "User input parsed as template.")
-
-    def _check_idor(self):
-        """Check for Insecure Direct Object Reference / Broken Access Control vulnerabilities in Go."""
-
-        # Direct DB lookup patterns using user input
-        direct_lookup_patterns = [
-            (r'db\.(?:QueryRow|Query)\s*\(\s*(?:["\']|`)[^"\'`]*WHERE\s+\w*id\s*=', "IDOR - Direct DB query by user-supplied ID"),
-            (r'db\.(?:First|Find|Last)\s*\(\s*&\w+\s*,\s*(?:r\.(?:URL\.Query|FormValue|PostFormValue)|vars\[)', "IDOR - Direct GORM lookup by user-supplied ID"),
-            (r'db\.(?:Where)\s*\(\s*["\'](?:id|ID)\s*=\s*\?["\']\s*,\s*(?:r\.(?:URL\.Query|FormValue)|vars\[)', "IDOR - Direct GORM Where by user-supplied ID"),
-            (r'db\.(?:Delete)\s*\(\s*&\w+\s*,\s*(?:r\.(?:URL\.Query|FormValue)|vars\[)', "IDOR - Direct GORM deletion by user-supplied ID"),
-        ]
-
-        # Auth context patterns
-        auth_context_patterns = [
-            r'session\.Values\[', r'GetSession\(', r'middleware\.Auth',
-            r'currentUser', r'userID\s*:=\s*session', r'getUserID\(',
-            r'IsAuthenticated', r'RequireAuth', r'AuthMiddleware',
-            r'ctx\.Value\(.*[Uu]ser', r'claims\[', r'token\.',
-        ]
-
-        # Route patterns without auth middleware
-        route_patterns = [
-            (r'(?:HandleFunc|Handle)\s*\(\s*["\']\/(?:admin|api)\/[^"\']*(?:delete|remove|update)', "IDOR - Sensitive route handler without apparent auth middleware"),
-            (r'\.(?:DELETE|PUT|PATCH)\s*\(\s*["\']\/[^"\']*\{', "IDOR - Destructive route with path parameter"),
-        ]
-
-        for i, line in enumerate(self.source_lines, 1):
-            stripped = line.strip()
-            if stripped.startswith('//'):
-                continue
-
-            context_start = max(0, i - 8)
-            context_end = min(len(self.source_lines), i + 5)
-            context = '\n'.join(self.source_lines[context_start:context_end])
-
-            has_auth_context = any(re.search(pat, context, re.IGNORECASE) for pat in auth_context_patterns)
-
-            # Check direct DB lookup patterns
-            for pattern, vuln_name in direct_lookup_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    if has_auth_context:
-                        continue
-                    self._add_finding(i, vuln_name,
-                                      VulnCategory.IDOR, Severity.HIGH, "MEDIUM",
-                                      description="Database lookup uses user-supplied ID without authorization check.")
-
-            # Indirect: variable from request used in DB lookup
-            req_var_match = re.search(r'(\w+)\s*:=\s*r\.(?:URL\.Query\(\)\.Get|FormValue|PostFormValue)\s*\(\s*["\'](?:id|ID|user_id|userId)', line)
-            if req_var_match:
-                var_name = req_var_match.group(1)
-                for j in range(i, min(len(self.source_lines), i + 15)):
-                    fwd_line = self.source_lines[j]
-                    if re.search(rf'db\.(?:First|Find|QueryRow|Delete|Where)\s*\([^)]*\b{re.escape(var_name)}\b', fwd_line):
-                        fwd_context = '\n'.join(self.source_lines[max(0, j - 5):min(len(self.source_lines), j + 5)])
-                        if not any(re.search(ap, fwd_context, re.IGNORECASE) for ap in auth_context_patterns):
-                            self._add_finding(j + 1, "IDOR - Indirect object lookup by user-supplied ID",
-                                              VulnCategory.IDOR, Severity.HIGH, "MEDIUM",
-                                              description=f"Variable '{var_name}' from request used in DB lookup without authorization check.")
-
-            # Check route patterns
-            for pattern, vuln_name in route_patterns:
-                if re.search(pattern, line, re.IGNORECASE):
-                    func_context = '\n'.join(self.source_lines[max(0, i - 3):min(len(self.source_lines), i + 3)])
-                    has_auth_mw = re.search(r'[Aa]uth|[Mm]iddleware|[Gg]uard|[Pp]rotect', func_context)
-                    if not has_auth_mw:
-                        self._add_finding(i, vuln_name,
-                                          VulnCategory.IDOR, Severity.MEDIUM, "MEDIUM",
-                                          description="Destructive/sensitive route appears to lack authentication middleware.")
-
-        # =====================================================================
-        # MFLAC: Missing Function Level Access Control (Go)
-        # =====================================================================
-
-        # Auth-only middleware wrappers
-        go_auth_only = [
-            r'AuthMiddleware\b', r'RequireAuth\b', r'TokenAuth\b',
-            r'JWTMiddleware\b', r'RequireLogin\b', r'EnsureAuth\b',
-            r'IsAuthenticated\b', r'VerifyToken\b', r'AuthRequired\b',
-        ]
-
-        # Role/admin middleware wrappers
-        go_role_middleware = [
-            r'AdminMiddleware\b', r'RequireAdmin\b', r'IsAdmin\b',
-            r'RequireRole\b', r'CheckRole\b', r'HasRole\b',
-            r'AdminOnly\b', r'RequirePermission\b', r'Authorize\b',
-            r'RoleMiddleware\b', r'RBAC\b',
-        ]
-
-        # Admin path indicators
-        go_admin_paths = [
-            r'/admin/', r'/api/admin/', r'/management/', r'/internal/',
-            r'/superadmin/', r'/moderator/',
-            r'system-reset', r'system-config', r'reset-all',
-            r'delete-all', r'purge', r'wipe',
-            r'/users/delete', r'/users/ban',
-            r'/config/', r'/settings/global', r'/roles/', r'/permissions/',
-        ]
-
-        for i, line in enumerate(self.source_lines, 1):
-            stripped = line.strip()
-            # Match Go route definitions (gorilla/mux, chi, gin, etc.)
-            route_match = re.search(
-                r'(?:HandleFunc|Handle|GET|POST|PUT|DELETE|PATCH)\s*\(\s*["\']([^"\']+)["\']',
-                stripped
-            )
-            if not route_match:
-                continue
-
-            route_path = route_match.group(1)
-            is_admin_path = any(re.search(pat, route_path, re.IGNORECASE) for pat in go_admin_paths)
-            if not is_admin_path:
-                continue
-
-            # Check route line and surrounding context for middleware
-            route_context = '\n'.join(self.source_lines[max(0, i - 5):min(len(self.source_lines), i + 3)])
-
-            has_auth_only = any(re.search(pat, route_context) for pat in go_auth_only)
-            has_role_check = any(re.search(pat, route_context) for pat in go_role_middleware)
-
-            # Check handler body for inline role checks
-            handler_end = min(len(self.source_lines), i + 15)
-            handler_body = '\n'.join(self.source_lines[i-1:handler_end])
-            has_inline_role = re.search(
-                r'\.Role\s*[!=]=|isAdmin|IsAdmin|hasRole|GetRole|'
-                r'role\s*==\s*"admin"|userRole|checkPermission',
-                handler_body
-            )
-
-            is_mutating = re.search(r'POST|PUT|DELETE|PATCH', stripped)
-
-            if has_auth_only and not has_role_check and not has_inline_role:
-                sev = Severity.HIGH if is_mutating else Severity.MEDIUM
-                self._add_finding(
-                    i,
-                    "MFLAC - Admin route with auth-only middleware",
-                    VulnCategory.IDOR, sev, "HIGH",
-                    description=f"Route '{route_path}' uses authentication middleware but lacks "
-                    f"role-based authorization (e.g., AdminMiddleware, RequireRole). Any authenticated "
-                    f"user can access this privileged endpoint."
-                )
-
-
 class RubyAnalyzer:
     """
     Ruby analyzer with taint tracking for Rails and general Ruby vulnerabilities.
@@ -10005,6 +9730,7 @@ class RubyAnalyzer:
         self._check_structural_sqli()
         self._check_calculation_sqli()
         self._check_destructive_sqli()
+        self._check_path_traversal()
         self._check_idor()
         return self.findings
 
@@ -10151,6 +9877,13 @@ class RubyAnalyzer:
                                       VulnCategory.CODE_INJECTION, Severity.HIGH, "MEDIUM", taint_var,
                                       "User-controlled method invocation.")
 
+            # .try(params[:method]) — arbitrary method dispatch
+            if re.search(r'\.try\s*\(\s*params\s*\[', line):
+                self._add_finding(i, "Code Injection - try() with user-controlled method name",
+                                  VulnCategory.CODE_INJECTION, Severity.HIGH, "HIGH",
+                                  description="User-controlled method name passed to .try() allows "
+                                  "arbitrary method invocation on the receiver.")
+
     def _check_deserialization(self):
         for i, line in enumerate(self.source_lines, 1):
             if line.strip().startswith('#'):
@@ -10273,12 +10006,41 @@ class RubyAnalyzer:
                             "Use parameterized queries or sanitize input."
                         )
 
+    def _check_path_traversal(self):
+        """Check for path traversal / arbitrary file access in Ruby."""
+        for i, line in enumerate(self.source_lines, 1):
+            if line.strip().startswith('#'):
+                continue
+
+            # send_file with tainted path
+            if re.search(r'\bsend_file\b', line):
+                is_tainted, taint_var = self._is_tainted(line)
+                if is_tainted:
+                    self._add_finding(i, "Path Traversal - send_file with user-controlled path",
+                                      VulnCategory.CODE_INJECTION, Severity.HIGH, "HIGH", taint_var,
+                                      "User-controlled path in send_file allows arbitrary file download.")
+                else:
+                    # Check if the variable passed to send_file is tainted via backward context
+                    arg_match = re.search(r'send_file\s+(\w+)', line)
+                    if arg_match:
+                        arg_name = arg_match.group(1)
+                        for back in range(max(0, i - 8), i - 1):
+                            back_line = self.source_lines[back]
+                            if re.search(rf'\b{re.escape(arg_name)}\b\s*=', back_line):
+                                back_tainted, back_var = self._is_tainted(back_line)
+                                if back_tainted:
+                                    self._add_finding(i, "Path Traversal - send_file with user-controlled path",
+                                                      VulnCategory.CODE_INJECTION, Severity.HIGH, "HIGH", back_var,
+                                                      "User-controlled path flows into send_file, allowing arbitrary file download.")
+                                    break
+
     def _check_idor(self):
         """Check for Insecure Direct Object Reference / Broken Access Control vulnerabilities in Ruby."""
 
         # Direct lookup patterns using user input (params)
         direct_lookup_patterns = [
             (r'\w+\.find\s*\(\s*params\s*\[\s*:[a-zA-Z_]*id\s*\]', "IDOR - Direct model find by user-supplied ID"),
+            (r'\w+\.find_by_id\s*\(\s*params\s*\[', "IDOR - Direct model find_by_id by user-supplied ID"),
             (r'\w+\.find_by\s*\(\s*id:\s*params\s*\[', "IDOR - Direct model find_by by user-supplied ID"),
             (r'\w+\.find_by!\s*\(\s*id:\s*params\s*\[', "IDOR - Direct model find_by! by user-supplied ID"),
             (r'\w+\.where\s*\(\s*id:\s*params\s*\[', "IDOR - Direct model where by user-supplied ID"),
@@ -10297,16 +10059,29 @@ class RubyAnalyzer:
             (r'\w+\.create\s*\(\s*params\b(?!\.(?:require|permit))', "IDOR - Mass assignment via create with raw params"),
             (r'\w+\.new\s*\(\s*params\b(?!\.(?:require|permit))', "IDOR - Mass assignment via new with raw params"),
             (r'\w+\.assign_attributes\s*\(\s*params\b(?!\.(?:require|permit))', "IDOR - Mass assignment via assign_attributes with raw params"),
+            # params.require(:model).permit! — permits ALL attributes
+            (r'params\.require\s*\(\s*:\w+\s*\)\.permit!', "Mass Assignment - params.require().permit! permits all attributes"),
+            # .to_unsafe_h / .to_unsafe_hash — bypasses strong parameters
+            (r'params(?:\s*\[\s*:\w+\s*\])?\.to_unsafe_h', "Mass Assignment - to_unsafe_h bypasses strong parameters"),
+            (r'params(?:\s*\[\s*:\w+\s*\])?\.to_unsafe_hash', "Mass Assignment - to_unsafe_hash bypasses strong parameters"),
         ]
 
-        # Auth context patterns
-        auth_context_patterns = [
-            r'\bcurrent_user\b', r'\bcurrent_admin\b', r'authenticate_user!',
-            r'before_action\s*:authenticate', r'authorize\s', r'authorize!',
-            r'can\?\s', r'cannot\?\s', r'Pundit', r'CanCanCan',
-            r'\.where\s*\(\s*user:\s*current_user', r'\.where\s*\(\s*user_id:\s*current_user',
-            r'current_user\.\w+\.find', r'@current_user',
-            r'settings\.current_user', r'session\[:current_user',
+        # Same-line scoping patterns — if the line itself is scoped through current_user, skip
+        same_line_scoping = [
+            r'current_user\.\w+\.(find|where|find_by|find_by!|find_by_id|destroy|delete)',
+            r'settings\.current_user',
+        ]
+
+        # Narrow-context (±3 lines) ownership/authorization patterns
+        ownership_patterns = [
+            r'\.\w*(?:user|owner|creator|author)_id\s*[!=]==?\s*current_user',
+            r'\.\w*(?:user|owner|creator|author)\s*==\s*current_user',
+            r'current_user\.id\s*[!=]==?\s*\w+\.\w*(?:user|owner|creator)_id',
+            r'\bauthorize[!\s]', r'\bauthorize\b',
+            r'\bcan\?\s', r'\bcannot\?\s',
+            r'params\s*\[\s*:\w*id\s*\]\s*==\s*(?:settings\.)?current_user',
+            r'(?:settings\.)?current_user\w*\s*==\s*params\s*\[\s*:\w*id',
+            r'session\[:current_user',
         ]
 
         for i, line in enumerate(self.source_lines, 1):
@@ -10314,17 +10089,23 @@ class RubyAnalyzer:
             if stripped.startswith('#'):
                 continue
 
-            context_start = max(0, i - 8)
-            context_end = min(len(self.source_lines), i + 5)
-            context = '\n'.join(self.source_lines[context_start:context_end])
-
-            has_auth_context = any(re.search(pat, context, re.IGNORECASE) for pat in auth_context_patterns)
-
             # Check direct lookup patterns
             for pattern, vuln_name in direct_lookup_patterns:
                 if re.search(pattern, line, re.IGNORECASE):
-                    if has_auth_context:
+                    # Check 1: Is the line itself scoped through current_user?
+                    if any(re.search(sp, line, re.IGNORECASE) for sp in same_line_scoping):
                         continue
+
+                    # Check 2: Is there an ownership/authorization check within ±3 lines?
+                    narrow_start = max(0, i - 3)
+                    narrow_end = min(len(self.source_lines), i + 3)
+                    narrow_ctx = '\n'.join(
+                        l for l in self.source_lines[narrow_start:narrow_end]
+                        if not l.strip().startswith('#')
+                    )
+                    if any(re.search(op, narrow_ctx, re.IGNORECASE) for op in ownership_patterns):
+                        continue
+
                     self._add_finding(i, vuln_name,
                                       VulnCategory.IDOR, Severity.HIGH, "HIGH",
                                       description="ActiveRecord lookup uses user-supplied ID without authorization check. "
@@ -10494,7 +10275,6 @@ class ASTScanner:
         '.config': 'aspnet_config',
         '.aspx': 'csharp',
         '.ascx': 'csharp',
-        '.go': 'go',
         '.rb': 'ruby',
         '.erb': 'ruby',
     }
@@ -10603,8 +10383,6 @@ class ASTScanner:
                 findings = self._scan_csharp(source_code, str(file_path))
             elif lang == 'aspnet_config':
                 findings = self._scan_aspnet_config(source_code, str(file_path))
-            elif lang == 'go':
-                findings = self._scan_go(source_code, str(file_path))
             elif lang == 'ruby':
                 findings = self._scan_ruby(source_code, str(file_path))
         except Exception as e:
@@ -10661,12 +10439,6 @@ class ASTScanner:
     def _scan_aspnet_config(self, source_code: str, file_path: str) -> List[Finding]:
         """Scan ASP.NET web.config files."""
         analyzer = ASPNetConfigAnalyzer(source_code, file_path)
-        findings = analyzer.analyze()
-        return self._filter_findings(findings)
-
-    def _scan_go(self, source_code: str, file_path: str) -> List[Finding]:
-        """Scan Go source code."""
-        analyzer = GoAnalyzer(source_code, file_path)
         findings = analyzer.analyze()
         return self._filter_findings(findings)
 
@@ -11018,7 +10790,7 @@ def _build_finding_panel(f: Finding, source_code: Optional[str] = None) -> Panel
         ext_map = {
             '.py': 'python', '.js': 'javascript', '.ts': 'typescript',
             '.java': 'java', '.php': 'php', '.cs': 'csharp',
-            '.go': 'go', '.rb': 'ruby', '.kt': 'kotlin',
+            '.rb': 'ruby', '.kt': 'kotlin',
             '.scala': 'scala', '.jsx': 'javascript', '.tsx': 'typescript',
         }
         ext = os.path.splitext(f.file_path)[1].lower()

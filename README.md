@@ -23,7 +23,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.8+-3776ab?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.8+">
-  <img src="https://img.shields.io/badge/languages-8+-22c55e?style=for-the-badge" alt="8+ Languages">
+  <img src="https://img.shields.io/badge/languages-7+-22c55e?style=for-the-badge" alt="7+ Languages">
   <img src="https://img.shields.io/badge/2nd--Order-Detection-ff6b6b?style=for-the-badge" alt="2nd-Order">
   <img src="https://img.shields.io/badge/version-3.0-blueviolet?style=for-the-badge" alt="Version">
 </p>
@@ -34,7 +34,6 @@
   <img src="https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=black" alt="JavaScript">
   <img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/PHP-777BB4?style=flat-square&logo=php&logoColor=white" alt="PHP">
-  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
   <img src="https://img.shields.io/badge/Ruby-CC342D?style=flat-square&logo=ruby&logoColor=white" alt="Ruby">
   <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript">
 </p>
@@ -93,16 +92,32 @@
 <td align="center"><b>12</b></td>
 </tr>
 <tr>
+<td><b>RailsGoat (OWASP)</b></td>
+<td align="center">22</td>
+<td align="center"><code>5</code></td>
+<td align="center"><code>15</code></td>
+<td align="center"><code>0</code></td>
+<td align="center"><b>20</b></td>
+</tr>
+<tr>
+<td><b>DVCSharp API</b></td>
+<td align="center">10</td>
+<td align="center"><code>3</code></td>
+<td align="center"><code>6</code></td>
+<td align="center"><code>0</code></td>
+<td align="center"><b>9</b></td>
+</tr>
+<tr>
 <td colspan="2" align="right"><b>TOTAL</b></td>
-<td align="center"><b><code>66</code></b></td>
-<td align="center"><b><code>100</code></b></td>
-<td align="center"><b><code>8</code></b></td>
-<td align="center"><b>174</b></td>
+<td align="center"><b><code>74</code></b></td>
+<td align="center"><b><code>121</code></b></td>
+<td align="center"><b><code>12</code></b></td>
+<td align="center"><b>203</b></td>
 </tr>
 </table>
 
 <p align="center">
-  <sub>584 files scanned across Python, Java, JavaScript, and TypeScript codebases</sub>
+  <sub>616 files scanned across Python, Java, JavaScript, TypeScript, Ruby, and C# codebases</sub>
 </p>
 
 ### Vulnerabilities Detected
@@ -143,6 +158,28 @@
 - `eval()` with user input (RCE)
 - NoSQL Injection with `$ne` operator
 - Dynamic `require()` for RCE
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+**RailsGoat (Ruby)**
+- SQL Injection via string interpolation in ActiveRecord
+- IDOR via `find_by_id`, `where` without ownership check
+- Code Injection via `constantize` and `.try()` with user input
+- Insecure Deserialization via `Marshal.load`
+- Command Injection in `system()` call
+
+</td>
+<td width="50%" valign="top">
+
+**DVCSharp API (C#)**
+- SQL Injection via EF Core `FromSql` with interpolated string
+- IDOR via LINQ `Where` with cookie-sourced ID
+- Deserialization via `Type.GetType()` with user-controlled type
+- XXE in XML parser without secure configuration
+- SSRF in URL construction
 
 </td>
 </tr>
@@ -311,6 +348,24 @@ The following vulnerability types are **not** scanned:
 </tr>
 </table>
 
+### Detection Mechanism by Language
+
+Each language uses a different mix of analysis techniques depending on parser availability and framework complexity:
+
+| Language | AST Taint Tracking | Regex Taint Tracking | Regex Pattern Matching | Notes |
+|----------|:------------------:|:--------------------:|:----------------------:|-------|
+| **Python** | ~60% | ~10% | ~30% | Full AST via `ast.NodeVisitor` — traces assignments, calls, returns. Regex for evasion & IDOR post-pass. |
+| **Java** | — | ~45% | ~55% | Regex identifies `@PathVariable`/`@RequestParam` sources, tracks through getters & entity chains to sinks. Spring annotation analysis for MFLAC. |
+| **JavaScript** | — | ~30% | ~70% | Regex-based source identification (`req.params`, `req.body`), variable assignment tracking. Direct pattern matching for IDOR/MFLAC/NoSQL. |
+| **TypeScript** | — | ~30% | ~70% | Same engine as JavaScript. Covers NestJS decorators and TypeORM patterns. |
+| **PHP** | — | ~35% | ~65% | Tracks `$_GET`/`$_POST`/`$request->input()` through variable assignments. Regex for Laravel/PDO/mysqli sink detection. |
+| **C#** | — | ~40% | ~60% | Constructor parameter flow, LINQ taint tunnel, field tracking. Brace-depth-aware method body analysis for IDOR ownership checks. |
+| **Ruby** | — | ~30% | ~70% | Tracks `params[]` through variable assignments. Regex for ActiveRecord sinks, 2nd-order structural/calculation/destructive SQLi. |
+
+> **AST Taint Tracking** = Full abstract syntax tree parsing with data flow analysis (only Python).
+> **Regex Taint Tracking** = Regex-based source identification → variable propagation → sink detection (all other languages).
+> **Regex Pattern Matching** = Direct pattern matching without variable flow tracking (e.g., `findById(req.params.id)` matched as a single pattern).
+
 ### Detection Quality Matrix
 
 | Category | 1st-Order | 2nd-Order | Evasion Detection |
@@ -323,12 +378,12 @@ The following vulnerability types are **not** scanned:
 | Deserialization | Excellent | Double-unserialize | ViewState, SnakeYAML |
 | XXE/XSLT | Excellent | - | XmlResolver |
 | Expression Language | Excellent | - | SpEL, OGNL, MVEL, EL |
-| IDOR | Excellent | - | Destructuring, mass assignment |
-| MFLAC | Excellent | - | AST-based (Java), route analysis |
+| IDOR | Excellent | - | Destructuring, dynamic finders, scoped query detection |
+| MFLAC | Excellent | - | AST-based (Java), route analysis, before_action (Rails) |
 
 ### Multi-Language Test Validation
 
-The scanner has been validated against comprehensive test suites covering all vulnerability categories across 8 languages/frameworks:
+The scanner has been validated against comprehensive test suites covering all vulnerability categories across 7 languages/frameworks:
 
 | Language | Framework | True Positives | Categories Covered |
 |----------|-----------|:--------------:|:-------------------|
@@ -339,7 +394,6 @@ The scanner has been validated against comprehensive test suites covering all vu
 | **PHP** | Laravel, Symfony | 40+ | SQL/NoSQL, Command, Code, XPath, XXE, XSLT, SSRF, SSTI, Deserialization, Evasion, IDOR, MFLAC |
 | **C#** | ASP.NET, Entity Framework | 35+ | SQL/NoSQL, Command, Code, XPath, XXE, XSLT, SSRF, SSTI, Deserialization, Evasion, IDOR, MFLAC |
 | **Ruby** | Rails, ActiveRecord, Sinatra | 30+ | SQL/NoSQL, Command, Code, XPath, XXE, SSRF, SSTI, Deserialization, Evasion, IDOR, MFLAC |
-| **Go** | GORM, net/http | 25+ | SQL, Command, Code (template), XPath, XXE, SSRF, SSTI, Deserialization, IDOR, MFLAC |
 
 **Test categories include:**
 - SQL/NoSQL/HQL Injection (string concat, format, interpolation, 2nd-order)
@@ -410,7 +464,7 @@ The scanner tracks data from these **entity sources**:
 
 ## IDOR & MFLAC Detection
 
-VulnHunter detects **Insecure Direct Object Reference (IDOR)** and **Missing Function Level Access Control (MFLAC)** across all 8 supported languages.
+VulnHunter detects **Insecure Direct Object Reference (IDOR)** and **Missing Function Level Access Control (MFLAC)** across all 7 supported languages.
 
 ### IDOR Patterns Detected
 
@@ -423,7 +477,9 @@ VulnHunter detects **Insecure Direct Object Reference (IDOR)** and **Missing Fun
 | **Indirect taint to ORM lookup** | Python, PHP | `user_id = request.args.get('id'); User.objects.get(pk=user_id)` |
 | **Indirect taint to PDO/Laravel** | PHP | `$id = $request->input('id'); Item::find($id)` |
 | **EntityManager.find** | Java | `em.find(User.class, id)` with `@PathVariable` |
+| **Dynamic finder lookup** | Ruby | `Pay.find_by_id(params[:id])` without ownership check |
 | **Destructuring to DB lookup** | JS/TS | `const { userId } = req.params; data[userId]` |
+| **Arbitrary method dispatch** | Ruby | `self.try(params[:graph])` — user-controlled method invocation |
 
 ### MFLAC Patterns Detected
 
@@ -447,6 +503,8 @@ VulnHunter detects **Insecure Direct Object Reference (IDOR)** and **Missing Fun
 - Class-level `[Route]` combined with method `[Http*]` for admin path detection (C#)
 - PHP `abort(403)`, `!= auth()->id()` recognized as ownership verification
 - `req.user.*` excluded from NoSQL injection patterns (session values, not user input)
+- Ruby IDOR: same-line scoping (`current_user.orders.find(...)`) vs narrow-context (±3 lines) ownership checks — prevents unrelated `current_user` mentions from suppressing findings
+- Google jsapi and third-party JS libraries auto-skipped to avoid minified file false positives
 
 > **Note:** IDOR and MFLAC detection is **not comprehensive**. These are pattern-based heuristics that catch common anti-patterns but may miss complex authorization logic, custom middleware chains, or framework-specific security configurations. For thorough access control testing, combine static analysis with dynamic testing (e.g., Burp Suite, OWASP ZAP) and manual code review.
 
@@ -652,10 +710,9 @@ When the scanner detects a minified JavaScript file, it displays a prominent war
 | **TypeScript** | `.ts`, `.tsx` | Node.js, TypeORM | Yes | Full |
 | **Python** | `.py` | Flask, Django, SQLAlchemy, Pandas | Yes | Full |
 | **PHP** | `.php` | Laravel, PDO, mysqli | Yes | Full |
-| **Go** | `.go` | GORM, database/sql | Limited | Basic |
-| **Ruby** | `.rb` | Rails, ActiveRecord | Limited | Basic |
+| **Ruby** | `.rb` | Rails, ActiveRecord, Sinatra | Yes | Full |
 
-> **Note:** Go and Ruby support is basic. Core vulnerability patterns are detected, but advanced 2nd-order flows and framework-specific sinks may be missing.
+> **Note:** Ruby 2nd-order detection covers structural SQLi (order/group/pluck), calculation injection, and destructive sink patterns via ActiveRecord. Validated against OWASP RailsGoat with 20 true positives and 0 false positives.
 
 ---
 
