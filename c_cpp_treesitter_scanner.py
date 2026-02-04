@@ -384,6 +384,8 @@ UNSAFE_COPY_FUNCS = {
     # Wide variants
     "lstrcpy", "lstrcpyA", "lstrcpyW", "lstrcat", "lstrcatA", "lstrcatW",
     "_tcscpy", "_tcscat",
+    # POSIX / BSD / multibyte variants
+    "stpcpy", "_mbscpy", "_mbscat",
 }
 
 # memcpy/memmove/strncpy/strncat are "suspicious" if the size arg is a raw variable
@@ -391,6 +393,8 @@ UNSAFE_COPY_FUNCS = {
 BOUNDED_COPY_FUNCS = {
     "memcpy", "memmove", "strncpy", "strncat", "wmemcpy", "wmemmove",
     "CopyMemory", "RtlCopyMemory",
+    # Wide / BSD / legacy variants
+    "wcsncpy", "wcsncat", "strlcpy", "strlcat", "bcopy",
 }
 
 
@@ -404,6 +408,202 @@ def _size_arg_looks_safe(arg_node: Node) -> bool:
     # sizeof(...) calls appear as call_expression with "sizeof" or as sizeof_expression
     if arg_node.type == "sizeof_expression":
         return True
+    # ALL_CAPS identifiers are likely enum constants or #define constants
+    if is_identifier(arg_node) and re.match(r"^[A-Z][A-Z0-9_]+$", text):
+        return True
+    # Ternary expression with a constant bound: (n < 64 ? n : 64) or (n > 64 ? 64 : n)
+    if arg_node.type == "conditional_expression":
+        children = arg_node.children
+        # conditional_expression: condition ? consequence : alternative
+        # At least 5 children: cond, ?, consequence, :, alternative
+        if len(children) >= 5:
+            consequence = children[2]
+            alternative = children[4]
+            if is_number_literal(consequence) or is_number_literal(alternative):
+                return True
+            if "sizeof" in get_node_text(consequence) or "sizeof" in get_node_text(alternative):
+                return True
+    return False
+
+
+# Sprintf format specifiers that produce bounded output (no %s or %n)
+_BOUNDED_FMT_SPEC = re.compile(
+    r"%"                     # literal %
+    r"[-+ #0]*"              # optional flags
+    r"(?:\d+|\*)?"           # optional width
+    r"(?:\.(?:\d+|\*))?"     # optional precision
+    r"[diouxXeEfFgGaAcpn%]" # bounded conversion (no 's')
+)
+
+_ALL_FMT_SPEC = re.compile(r"%(?:[-+ #0]*(?:\d+|\*)?(?:\.(?:\d+|\*))?(?:hh?|ll?|[Lqjzt])?[diouxXeEfFgGaAcpns%])")
+
+
+def _sprintf_format_is_bounded(fmt_text: str) -> bool:
+    """Return True if a sprintf format string contains NO %s (only bounded specifiers).
+    Requires the format to be a string literal we can inspect."""
+    # Strip surrounding quotes
+    if fmt_text.startswith('"') and fmt_text.endswith('"'):
+        fmt_text = fmt_text[1:-1]
+    elif fmt_text.startswith("L\"") and fmt_text.endswith('"'):
+        fmt_text = fmt_text[2:-1]
+    else:
+        return False  # Not a literal we can analyse
+
+    # If it contains %s or %n, it's not bounded
+    specs = _ALL_FMT_SPEC.findall(fmt_text)
+    if not specs:
+        return True  # No format specifiers at all → pure literal, bounded
+    for s in specs:
+        if s.endswith("s"):
+            # Check if precision is set: %.Ns limits output
+            if ".%" not in s and re.match(r"%[-+ #0]*(?:\d+|\*)?\.(\d+)", s):
+                continue  # precision-limited %s is bounded
+            return False
+        if s.endswith("n"):
+            return False  # %n is dangerous
+    return True
+
+
+def _source_arg_is_string_literal(call_node: Node, base_name: str) -> Optional[str]:
+    """For strcpy/strcat, check if the source (second arg) is a string literal.
+    Returns the literal text if it is, None otherwise."""
+    if base_name not in ("strcpy", "strcat", "lstrcpy", "lstrcpyA", "lstrcpyW",
+                         "lstrcat", "lstrcatA", "lstrcatW", "wcscpy", "wcscat",
+                         "_tcscpy", "_tcscat", "stpcpy", "_mbscpy", "_mbscat"):
+        return None
+    args = get_call_args(call_node)
+    if len(args) >= 2 and is_string_literal(args[1]):
+        return get_node_text(args[1])
+    return None
+
+
+def _sprintf_format_arg(call_node: Node, base_name: str) -> Optional[Node]:
+    """For sprintf/vsprintf/wsprintf, return the format argument node if it's a literal."""
+    if base_name in ("sprintf", "wsprintf"):
+        args = get_call_args(call_node)
+        if len(args) >= 2 and is_string_literal(args[1]):
+            return args[1]
+    elif base_name == "vsprintf":
+        args = get_call_args(call_node)
+        if len(args) >= 2 and is_string_literal(args[1]):
+            return args[1]
+    return None
+
+
+def _strcpy_dst_has_strlen_malloc(call_node: Node, base_name: str) -> bool:
+    """Check if the destination of strcpy was allocated with malloc(strlen(src) + 1).
+    Handles both direct and indirect patterns:
+      Direct:   dst = malloc(strlen(src) + 1);  strcpy(dst, src);
+      Indirect: len = strlen(src); dst = malloc(len + 1); strcpy(dst, src);"""
+    if base_name not in ("strcpy", "stpcpy", "_mbscpy"):
+        return False
+    args = get_call_args(call_node)
+    if len(args) < 2:
+        return False
+    dst_name = get_node_text(args[0])
+    src_name = get_node_text(args[1])
+    compound = find_enclosing_compound(call_node)
+    if not compound:
+        return False
+    call_line = call_node.start_point[0]
+
+    # Collect all statement texts before the call for analysis
+    pre_stmts = []
+    for child in compound.children:
+        if child.start_point[0] >= call_line:
+            break
+        pre_stmts.append(get_node_text(child))
+
+    # Also check declarations from enclosing function
+    func = find_enclosing_function(call_node)
+    if func:
+        for decl in find_nodes(func, "declaration"):
+            if decl.start_point[0] >= call_line:
+                continue
+            pre_stmts.append(get_node_text(decl))
+
+    all_text = "\n".join(pre_stmts)
+
+    # Direct pattern: dst = malloc(strlen(src) + 1)
+    if dst_name in all_text and "malloc" in all_text and "strlen(" + src_name + ")" in all_text:
+        return True
+
+    # Indirect pattern: len_var = strlen(src); ... dst = malloc(len_var + ...)
+    # Find variables assigned from strlen(src)
+    strlen_call = "strlen(" + src_name + ")"
+    for stmt_text in pre_stmts:
+        if strlen_call in stmt_text and "=" in stmt_text:
+            # Extract LHS variable: "type var = strlen(src)" or "var = strlen(src)"
+            eq_idx = stmt_text.index("=")
+            lhs = stmt_text[:eq_idx].strip().split()
+            if lhs:
+                len_var = lhs[-1].strip("* ")
+                if len_var and len_var.isidentifier():
+                    # Now check if dst = malloc(len_var + ...) exists
+                    for s2 in pre_stmts:
+                        if dst_name in s2 and "malloc" in s2 and len_var in s2:
+                            return True
+    return False
+
+
+def _strcpy_src_is_strlen_guarded(call_node: Node, base_name: str) -> bool:
+    """Check if the source of strcpy/strcat has a strlen guard before the call.
+    Pattern: if (strlen(src) < N) { ... strcpy(dst, src); ... }"""
+    if base_name not in ("strcpy", "strcat", "stpcpy", "lstrcpy", "lstrcpyA", "lstrcpyW",
+                         "lstrcat", "lstrcatA", "lstrcatW", "wcscpy", "wcscat",
+                         "_tcscpy", "_tcscat", "_mbscpy", "_mbscat"):
+        return False
+    args = get_call_args(call_node)
+    if len(args) < 2:
+        return False
+    src_name = get_node_text(args[1])
+    if not src_name or not src_name.isidentifier():
+        return False
+    # Walk up to find an enclosing if with strlen(src) in the condition
+    cur = call_node.parent
+    while cur:
+        if cur.type == "if_statement":
+            cond = get_child_by_type(cur, "parenthesized_expression")
+            if cond is None:
+                cond = get_child_by_type(cur, "binary_expression")
+            if cond:
+                cond_text = get_node_text(cond)
+                if "strlen(" + src_name + ")" in cond_text or "strlen( " + src_name + " )" in cond_text:
+                    return True
+        cur = cur.parent
+    return False
+
+
+def _var_is_guarded_before_call(call_node: Node, var_name: str) -> bool:
+    """Check if var_name has a guard (if/return/abort/assert) in the same compound
+    statement before this call.  Patterns:
+      if (var > N) return;
+      if (var > N) abort();
+      if (var >= N) { ... return; }
+      assert(var <= N);
+    """
+    compound = find_enclosing_compound(call_node)
+    if not compound:
+        return False
+    call_line = call_node.start_point[0]
+    for child in compound.children:
+        if child.start_point[0] >= call_line:
+            break
+        if child.type == "if_statement":
+            cond_text = ""
+            for c in child.children:
+                if c.type in ("binary_expression", "parenthesized_expression"):
+                    cond_text = get_node_text(c)
+                    break
+            if var_name in cond_text:
+                # Check if the body of the if is a return/abort/break/exit
+                body_text = get_node_text(child)
+                if any(kw in body_text for kw in ("return", "abort()", "exit(", "break", "goto")):
+                    return True
+        elif child.type == "expression_statement":
+            text = get_node_text(child)
+            if "assert" in text and var_name in text:
+                return True
     return False
 
 
@@ -416,16 +616,52 @@ def rule_unsafe_copy(tree: Node, source_bytes: bytes, filename: str) -> Generato
 
         if base_name in UNSAFE_COPY_FUNCS:
             line, col = node_location(call)
+            severity = Severity.HIGH
+            confidence = "HIGH"
+            desc_extra = ""
+
+            # --- FP reduction: string-literal source for strcpy/strcat variants ---
+            lit = _source_arg_is_string_literal(call, base_name)
+            if lit is not None:
+                # strcat(buf, "") is a noop — suppress entirely
+                if lit in ('""', "''", 'L""'):
+                    continue
+                # Short known literal → lower severity/confidence
+                severity = Severity.LOW
+                confidence = "LOW"
+                desc_extra = f" Source is a string literal ({lit}); overflow risk is low if destination is adequately sized."
+
+            # --- FP reduction: sprintf with only bounded format specifiers ---
+            fmt_node = _sprintf_format_arg(call, base_name)
+            if fmt_node is not None:
+                fmt_text = get_node_text(fmt_node)
+                if _sprintf_format_is_bounded(fmt_text):
+                    severity = Severity.LOW
+                    confidence = "LOW"
+                    desc_extra = f" Format string {fmt_text} produces bounded output (no %s)."
+
+            # --- FP reduction: strcpy where dst was malloc'd with strlen(src)+1 ---
+            if severity == Severity.HIGH and _strcpy_dst_has_strlen_malloc(call, base_name):
+                severity = Severity.LOW
+                confidence = "LOW"
+                desc_extra = " Destination buffer appears to be allocated with strlen(src)+1."
+
+            # --- FP reduction: strcpy/strcat where source is strlen-guarded ---
+            if severity == Severity.HIGH and _strcpy_src_is_strlen_guarded(call, base_name):
+                severity = Severity.LOW
+                confidence = "LOW"
+                desc_extra = " Source string length is checked before copy."
+
             yield Finding(
                 file_path=filename, line_number=line, col_offset=col,
                 line_content=get_source_line(source_bytes, line),
                 vulnerability_name=f"Unsafe function: {base_name}() has no bounds checking",
                 rule_id="MEM-UNSAFE-COPY",
                 category=VulnCategory.MEMORY_SAFETY,
-                severity=Severity.HIGH,
-                confidence="HIGH",
+                severity=severity,
+                confidence=confidence,
                 evidence=get_node_text(call),
-                description=f"Replace {base_name}() with a bounded alternative (e.g., strncpy, snprintf).",
+                description=f"Replace {base_name}() with a bounded alternative (e.g., strncpy, snprintf).{desc_extra}",
             )
         elif base_name in BOUNDED_COPY_FUNCS:
             args = get_call_args(call)
@@ -433,6 +669,21 @@ def rule_unsafe_copy(tree: Node, source_bytes: bytes, filename: str) -> Generato
             if args:
                 size_arg = args[-1]
                 if not _size_arg_looks_safe(size_arg):
+                    # --- FP reduction: check if size variable is guarded ---
+                    size_text = get_node_text(size_arg)
+                    # Extract the base variable name for guard checking
+                    # Handle expressions like "n * 4" → check "n"; plain "n" → "n"
+                    guard_var = None
+                    if is_identifier(size_arg):
+                        guard_var = size_text
+                    elif size_arg.type == "binary_expression":
+                        for ch in size_arg.children:
+                            if is_identifier(ch):
+                                guard_var = get_node_text(ch)
+                                break
+                    if guard_var and _var_is_guarded_before_call(call, guard_var):
+                        continue  # Size is validated; suppress finding
+
                     line, col = node_location(call)
                     yield Finding(
                         file_path=filename, line_number=line, col_offset=col,
