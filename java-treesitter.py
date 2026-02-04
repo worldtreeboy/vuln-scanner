@@ -80,6 +80,7 @@ class VulnCategory(Enum):
     SSTI = "Server-Side Template Injection"
     XPATH_INJECTION = "XPath Injection"
     XXE = "XML External Entity"
+    IDOR = "Mass Assignment / IDOR"
 
 
 @dataclass
@@ -355,6 +356,7 @@ class TaintTracker:
                         self.db_sourced[var_name] = (get_node_line(assign), rhs_text.strip())
 
         # Track StringBuilder patterns: sb.append(tainted)
+        # Track List/Collection patterns: list.add(tainted)
         method_invocations = find_nodes(body, "method_invocation")
         for mi in method_invocations:
             mi_text = node_text(mi)
@@ -368,6 +370,17 @@ class TaintTracker:
                     for tv in self.tainted:
                         if re.search(rf'\b{re.escape(tv)}\b', arg_text):
                             self.tainted[sb_var] = (get_node_line(mi), f"StringBuilder.append({tv})")
+                            break
+            # List.add(taintedVar) — propagate taint to collection
+            add_match = re.match(r'(\w+)\s*\.\s*add\s*\(', mi_text)
+            if add_match:
+                list_var = add_match.group(1)
+                args = get_child_by_type(mi, "argument_list")
+                if args:
+                    arg_text = node_text(args)
+                    for tv in self.tainted:
+                        if re.search(rf'\b{re.escape(tv)}\b', arg_text):
+                            self.tainted[list_var] = (get_node_line(mi), f"List.add({tv})")
                             break
 
     def _rhs_is_tainted(self, rhs_text: str, rhs_nodes: List[Node]) -> bool:
@@ -977,6 +990,12 @@ class JavaASTAnalyzer:
                     description="Base64-decoded user input may be deserialized downstream."
                 )
 
+    def _strip_comments(self, text: str) -> str:
+        """Remove Java line comments and block comments from text for safety checks."""
+        text = re.sub(r'//[^\n]*', '', text)
+        text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
+        return text
+
     def _stream_is_tainted(self, stream_var: str, body: Node, tracker: TaintTracker) -> bool:
         """Check if an ObjectInputStream variable was constructed from tainted data."""
         # Look for: new ObjectInputStream(taintedSource)
@@ -1027,7 +1046,7 @@ class JavaASTAnalyzer:
     def _is_validating_stream(self, var_name: str, body: Node) -> bool:
         """Check if a variable was created as ValidatingObjectInputStream."""
         body_text = node_text(body)
-        return bool(re.search(rf'{re.escape(var_name)}\s*=\s*new\s+ValidatingObjectInputStream', body_text))
+        return bool(re.search(rf'{re.escape(var_name)}\s*=\s*new\s+(?:[\w.]*\.)?ValidatingObjectInputStream', body_text))
 
     def _has_safe_constructor(self, yaml_var: str, body: Node) -> bool:
         """Check if a Yaml instance uses SafeConstructor."""
@@ -1058,7 +1077,7 @@ class JavaASTAnalyzer:
 
     def _has_kryo_registration(self, kryo_var: str, body: Node) -> bool:
         """Check if Kryo has setRegistrationRequired(true) — class whitelist mode."""
-        body_text = node_text(body)
+        body_text = self._strip_comments(node_text(body))
         return bool(re.search(rf'{re.escape(kryo_var)}\s*\.\s*setRegistrationRequired\s*\(\s*true\s*\)', body_text))
 
     # ========================================================================
@@ -1242,6 +1261,39 @@ class JavaASTAnalyzer:
                         description="User-controlled expression in EL evaluation."
                     )
 
+            # MVEL: MVEL.compileExpression(tainted) -> executeExpression()
+            if called == "compileExpression" and "MVEL" in mi_text:
+                args = get_child_by_type(mi, "argument_list")
+                if args and tracker.is_tainted(node_text(args)):
+                    self._add_finding(
+                        line, 0,
+                        "MVEL Injection - MVEL.compileExpression with tainted data",
+                        VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH",
+                        description="User-controlled MVEL expression compiled for execution."
+                    )
+
+            # MVEL: MVEL.executeExpression(compiled) — flag if compiled var is tainted
+            if called == "executeExpression" and "MVEL" in mi_text:
+                args = get_child_by_type(mi, "argument_list")
+                if args and tracker.is_tainted(node_text(args)):
+                    self._add_finding(
+                        line, 0,
+                        "MVEL Injection - MVEL.executeExpression with tainted data",
+                        VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH",
+                        description="Compiled MVEL expression from user input executed."
+                    )
+
+            # EL: ExpressionFactory.createValueExpression(ctx, tainted, type)
+            if called == "createValueExpression":
+                args = get_child_by_type(mi, "argument_list")
+                if args and tracker.is_tainted(node_text(args)):
+                    self._add_finding(
+                        line, 0,
+                        "EL Injection - ExpressionFactory.createValueExpression with tainted data",
+                        VulnCategory.CODE_INJECTION, Severity.CRITICAL, "HIGH",
+                        description="User-controlled expression in EL ValueExpression creation."
+                    )
+
     # ========================================================================
     # Reflection Injection
     # ========================================================================
@@ -1344,15 +1396,26 @@ class JavaASTAnalyzer:
             line = get_node_line(mi)
 
             # Velocity.evaluate(ctx, writer, tag, taintedTemplate)
-            if called == "evaluate" and re.search(r'[Vv]elocity|VelocityEngine', mi_text):
-                args = get_child_by_type(mi, "argument_list")
-                if args and tracker.is_tainted(node_text(args)):
-                    self._add_finding(
-                        line, 0,
-                        "SSTI - Velocity template with tainted data",
-                        VulnCategory.SSTI, Severity.CRITICAL, "HIGH",
-                        description="User-controlled Velocity template allows code execution."
-                    )
+            if called == "evaluate":
+                is_velocity = re.search(r'[Vv]elocity|VelocityEngine', mi_text)
+                if not is_velocity:
+                    # Check if receiver variable was created as VelocityEngine in method body
+                    receiver = self._get_receiver(mi)
+                    if receiver:
+                        recv_name = node_text(receiver)
+                        body_text = node_text(body)
+                        if re.search(rf'{re.escape(recv_name)}\s*=\s*new\s+(?:[\w.]*\.)?VelocityEngine', body_text) or \
+                           re.search(rf'VelocityEngine\s+{re.escape(recv_name)}\b', body_text):
+                            is_velocity = True
+                if is_velocity:
+                    args = get_child_by_type(mi, "argument_list")
+                    if args and tracker.is_tainted(node_text(args)):
+                        self._add_finding(
+                            line, 0,
+                            "SSTI - Velocity template with tainted data",
+                            VulnCategory.SSTI, Severity.CRITICAL, "HIGH",
+                            description="User-controlled Velocity template allows code execution."
+                        )
 
             # Thymeleaf: engine.process(tainted, ctx)
             if called == "process" and re.search(r'[Tt]hyme|[Tt]emplate', mi_text):
@@ -1366,6 +1429,29 @@ class JavaASTAnalyzer:
                             VulnCategory.SSTI, Severity.CRITICAL, "HIGH",
                             description="User-controlled template string in template engine."
                         )
+
+            # Pebble: pebble.getLiteralTemplate(tainted) / pebble.getTemplate(tainted)
+            if called in ("getLiteralTemplate", "getTemplate") and \
+               re.search(r'[Pp]ebble', mi_text):
+                args = get_child_by_type(mi, "argument_list")
+                if args and tracker.is_tainted(node_text(args)):
+                    self._add_finding(
+                        line, 0,
+                        "SSTI - Pebble template from user input",
+                        VulnCategory.SSTI, Severity.CRITICAL, "HIGH",
+                        description="User-controlled Pebble template allows code execution."
+                    )
+
+            # JMustache: Mustache.compiler().compile(tainted)
+            if called == "compile" and re.search(r'[Mm]ustache', mi_text):
+                args = get_child_by_type(mi, "argument_list")
+                if args and tracker.is_tainted(node_text(args)):
+                    self._add_finding(
+                        line, 0,
+                        "SSTI - Mustache template from user input",
+                        VulnCategory.SSTI, Severity.CRITICAL, "HIGH",
+                        description="User-controlled Mustache template allows code execution."
+                    )
 
         # Freemarker: new Template(name, new StringReader(tainted), cfg)
         for oc in find_nodes(body, "object_creation_expression"):
@@ -1753,6 +1839,7 @@ def _build_stats_sidebar(findings: List[Finding], file_count: int, elapsed: floa
         "SQL Injection": "SQL Injection",
         "NoSQL Injection": "NoSQL Injection",
         "XPath Injection": "XPath Injection",
+        "Mass Assignment / IDOR": "Mass Assignment",
     }
     for cat, count in sorted(cat_counts.items(), key=lambda x: -x[1]):
         display_name = cat_abbrev.get(cat, cat)
