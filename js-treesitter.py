@@ -81,6 +81,7 @@ class VulnCategory(Enum):
     DANGEROUS_EVAL = "Dangerous Eval"
     OPEN_REDIRECT = "Open Redirect"
     COMMAND_INJECTION = "Command Injection"
+    UNSAFE_DESERIALIZATION = "Unsafe Deserialization"
     VULNERABLE_DEPENDENCY = "Vulnerable Dependency"
 
 
@@ -180,6 +181,8 @@ CALL_SINKS = {
     'setTimeout': (VulnCategory.DANGEROUS_EVAL, Severity.HIGH, 'CWE-95'),
     'setInterval': (VulnCategory.DANGEROUS_EVAL, Severity.HIGH, 'CWE-95'),
     'setImmediate': (VulnCategory.DANGEROUS_EVAL, Severity.HIGH, 'CWE-95'),
+    'unserialize': (VulnCategory.UNSAFE_DESERIALIZATION, Severity.CRITICAL, 'CWE-502'),
+    '_decode': (VulnCategory.UNSAFE_DESERIALIZATION, Severity.HIGH, 'CWE-502'),
     'write': (VulnCategory.DOM_XSS, Severity.CRITICAL, 'CWE-79'),
     'writeln': (VulnCategory.DOM_XSS, Severity.CRITICAL, 'CWE-79'),
     'insertAdjacentHTML': (VulnCategory.DOM_XSS, Severity.CRITICAL, 'CWE-79'),
@@ -210,6 +213,18 @@ COMMAND_SINKS = {
     'execFile': (VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, 'CWE-78'),
     'execFileSync': (VulnCategory.COMMAND_INJECTION, Severity.CRITICAL, 'CWE-78'),
     'fork': (VulnCategory.COMMAND_INJECTION, Severity.HIGH, 'CWE-78'),
+}
+
+VM_SINKS = {
+    'runInContext': (VulnCategory.DANGEROUS_EVAL, Severity.CRITICAL, 'CWE-95'),
+    'runInNewContext': (VulnCategory.DANGEROUS_EVAL, Severity.CRITICAL, 'CWE-95'),
+    'runInThisContext': (VulnCategory.DANGEROUS_EVAL, Severity.CRITICAL, 'CWE-95'),
+    'compileFunction': (VulnCategory.DANGEROUS_EVAL, Severity.CRITICAL, 'CWE-95'),
+}
+
+DESERIALIZATION_SINKS = {
+    'unserialize': (VulnCategory.UNSAFE_DESERIALIZATION, Severity.CRITICAL, 'CWE-502'),
+    '_decode': (VulnCategory.UNSAFE_DESERIALIZATION, Severity.HIGH, 'CWE-502'),
 }
 
 PROTO_POLLUTION_PROPS = {'__proto__', 'constructor', 'prototype'}
@@ -267,6 +282,21 @@ REMEDIATION_MAP = {
     'insertAdjacentHTML': "Sanitize HTML content with DOMPurify.sanitize()",
     'assign': "Validate redirect URLs against an allowlist",
     'replace': "Validate redirect URLs against an allowlist",
+    'exec': "Use parameterized commands or an allowlist. Never interpolate user input into shell strings",
+    'execSync': "Use parameterized commands or an allowlist. Never interpolate user input into shell strings",
+    'spawn': "Pass arguments as an array, not a shell string. Avoid {shell: true} with user input",
+    'spawnSync': "Pass arguments as an array, not a shell string. Avoid {shell: true} with user input",
+    'execFile': "Validate the executable path and arguments against an allowlist",
+    'execFileSync': "Validate the executable path and arguments against an allowlist",
+    'fork': "Validate the module path against an allowlist. Never allow user input to control forked modules",
+    'unserialize': "Never deserialize untrusted data. Use JSON.parse() instead of node-serialize",
+    '_decode': "Never deserialize untrusted data. Use JSON.parse() instead of serialijse",
+    'runInContext': "Never pass user-controlled code to vm module. The vm module is not a security sandbox",
+    'runInNewContext': "Never pass user-controlled code to vm module. The vm module is not a security sandbox",
+    'runInThisContext': "Never pass user-controlled code to vm module. The vm module is not a security sandbox",
+    'compileFunction': "Never pass user-controlled code to vm.compileFunction(). Use a safe sandbox instead",
+    'Script': "Never pass user-controlled code to new vm.Script(). The vm module is not a security sandbox",
+    'load': "Use yaml.safeLoad() or yaml.load(data, { schema: SAFE_SCHEMA }) instead of yaml.load()",
 }
 
 
@@ -746,6 +776,21 @@ class JSASTAnalyzer:
                 return True
         return False
 
+    @staticmethod
+    def _has_dynamic_content(node: Node) -> bool:
+        """Check if a node contains any dynamic (non-literal) content.
+
+        Returns True for template strings with substitutions, identifiers,
+        member expressions, binary concatenation, call expressions, etc.
+        Returns False only for plain string/number literals and template
+        strings with no interpolation.
+        """
+        if node.type in ('string', 'number', 'true', 'false', 'null'):
+            return False
+        if node.type == 'template_string':
+            return any(True for _ in find_nodes(node, 'template_substitution'))
+        return True
+
     def _check_sink(self, node: Node, value_node: Node, sink_name: str,
                      sink_info: tuple, extra_desc: str = ""):
         """Check if a sink receives tainted data and report finding."""
@@ -938,10 +983,62 @@ class JSASTAnalyzer:
                 if func_name in CALL_SINKS and args:
                     if func_name in ('setTimeout', 'setInterval', 'setImmediate'):
                         first_arg = args[0]
+                        # String literal arg or tainted arg: flag via taint check
                         if first_arg.type == 'string' or self.tracker.is_tainted_node(first_arg):
                             self._check_sink(call, first_arg, func_name, CALL_SINKS[func_name])
+                        # Non-literal variable arg (identifier, member_expression, etc.)
+                        # passed as code string is dangerous
+                        elif (first_arg.type not in ('arrow_function', 'function')
+                              and self._has_dynamic_content(first_arg)
+                              and not self._is_sanitized(first_arg)):
+                            self._add_finding(
+                                call,
+                                f"Dangerous Eval via {func_name}",
+                                VulnCategory.DANGEROUS_EVAL, Severity.HIGH, 'MEDIUM',
+                                f"{func_name}() called with a non-function argument. "
+                                f"If the first argument is a string, it will be evaluated as code.",
+                                "CWE-95",
+                                REMEDIATION_MAP.get(func_name, f"Pass a function reference to {func_name}() instead of a string."),
+                                source=node_text(first_arg)[:120],
+                                sink=f"{func_name}()"
+                            )
                     else:
+                        before = len(self.findings)
                         self._check_sink(call, args[0], func_name, CALL_SINKS[func_name])
+
+                        # Dangerous direct calls with dynamic (non-literal) args
+                        # even without a proven taint chain
+                        if (len(self.findings) == before
+                                and not self._is_sanitized(args[0])
+                                and self._has_dynamic_content(args[0])):
+                            if func_name in ('eval', 'Function', 'execScript'):
+                                self._add_finding(
+                                    call,
+                                    f"Dangerous Eval via {func_name}",
+                                    VulnCategory.DANGEROUS_EVAL, Severity.CRITICAL, 'HIGH',
+                                    f"{func_name}() called with dynamic content that may include "
+                                    f"user-controlled data. Any non-literal argument to {func_name}() "
+                                    f"enables arbitrary code injection.",
+                                    "CWE-95",
+                                    REMEDIATION_MAP.get(func_name,
+                                        "Never use eval() with dynamic content. "
+                                        "Use JSON.parse() for JSON data or a safe parser for expressions."),
+                                    source=node_text(args[0])[:120],
+                                    sink=f"{func_name}()"
+                                )
+                            elif func_name in ('unserialize', '_decode'):
+                                cat, sev, cwe = CALL_SINKS[func_name]
+                                self._add_finding(
+                                    call,
+                                    f"Unsafe Deserialization via {func_name}()",
+                                    cat, sev, 'MEDIUM',
+                                    f"{func_name}() called with dynamic content. "
+                                    f"Deserializing untrusted data can lead to remote code execution.",
+                                    cwe,
+                                    REMEDIATION_MAP.get(func_name, "Never deserialize untrusted data."),
+                                    source=node_text(args[0])[:120],
+                                    sink=f"{func_name}()"
+                                )
 
                 if func_name == 'Function' and args:
                     self._check_sink(call, args[-1], 'Function', CALL_SINKS['Function'])
@@ -1010,7 +1107,7 @@ class JSASTAnalyzer:
                     self._check_sink(call, args[1], method, CALL_SINKS[method])
 
                 # jQuery methods (not Object.assign)
-                elif method in CALL_SINKS and args and not (obj_str == 'Object' and method == 'assign'):
+                elif method in CALL_SINKS and args and not (obj_str == 'Object' and method == 'assign') and method not in DESERIALIZATION_SINKS:
                     # location.assign/replace
                     if method in ('assign', 'replace') and 'location' in obj_str:
                         self._check_sink(call, args[0], method, CALL_SINKS[method])
@@ -1053,15 +1150,117 @@ class JSASTAnalyzer:
                 # Command sinks
                 elif method in COMMAND_SINKS:
                     if args:
-                        taint = self.tracker.is_tainted_node(args[0])
+                        cat, sev, cwe = COMMAND_SINKS[method]
+                        # Check ALL arguments for taint (spawn/execFile use
+                        # args array in second param, not just the first)
+                        taint = None
+                        taint_arg = args[0]
+                        for a in args:
+                            taint = self.tracker.is_tainted_node(a)
+                            if taint:
+                                taint_arg = a
+                                break
                         if taint:
-                            cat, sev, cwe = COMMAND_SINKS[method]
                             self._add_finding(
                                 call, f"Command Injection via {method}()",
                                 cat, sev, 'HIGH',
                                 f"Tainted data from '{taint.source_type}' used in command execution via {method}().",
-                                cwe, "Never pass user input directly to command execution.",
+                                cwe, REMEDIATION_MAP.get(method, "Never pass user input directly to command execution."),
                                 source=taint.source_code, sink=f"{method}()"
+                            )
+                        else:
+                            # Check all args for dynamic content
+                            dynamic_arg = None
+                            for a in args:
+                                if self._has_dynamic_content(a) and not self._is_sanitized(a):
+                                    dynamic_arg = a
+                                    break
+                            if dynamic_arg:
+                                # spawn/spawnSync: elevate confidence if {shell: true}
+                                conf = 'MEDIUM'
+                                shell_note = ""
+                                if method in ('spawn', 'spawnSync'):
+                                    opts_arg = args[2] if len(args) > 2 else None
+                                    if opts_arg:
+                                        opts_text = node_text(opts_arg)
+                                        if 'shell' in opts_text and 'true' in opts_text:
+                                            conf = 'HIGH'
+                                            shell_note = " with {shell: true}"
+                                else:
+                                    conf = 'HIGH'
+                                self._add_finding(
+                                    call, f"Command Injection via {method}()",
+                                    cat, sev, conf,
+                                    f"{method}() called with dynamic content{shell_note}. "
+                                    f"Non-literal arguments to command execution functions enable injection.",
+                                    cwe, REMEDIATION_MAP.get(method, "Never pass user input directly to command execution."),
+                                    source=node_text(dynamic_arg)[:120], sink=f"{method}()"
+                                )
+
+                # vm module sinks: vm.runInContext(), vm.runInNewContext(), etc.
+                elif method in VM_SINKS:
+                    if args:
+                        cat, sev, cwe = VM_SINKS[method]
+                        taint = self.tracker.is_tainted_node(args[0])
+                        if taint:
+                            self._add_finding(
+                                call, f"Dangerous Eval via vm.{method}()",
+                                cat, sev, 'HIGH',
+                                f"Tainted data from '{taint.source_type}' passed to vm.{method}(). "
+                                f"The vm module is not a security sandbox.",
+                                cwe, REMEDIATION_MAP.get(method, "Never pass user-controlled code to the vm module."),
+                                source=taint.source_code, sink=f"vm.{method}()"
+                            )
+                        elif self._has_dynamic_content(args[0]) and not self._is_sanitized(args[0]):
+                            self._add_finding(
+                                call, f"Dangerous Eval via vm.{method}()",
+                                cat, sev, 'HIGH',
+                                f"vm.{method}() called with dynamic content. "
+                                f"Any non-literal argument enables arbitrary code execution.",
+                                cwe, REMEDIATION_MAP.get(method, "Never pass user-controlled code to the vm module."),
+                                source=node_text(args[0])[:120], sink=f"vm.{method}()"
+                            )
+
+                # Deserialization sinks: unserialize(), _decode()
+                elif method in DESERIALIZATION_SINKS:
+                    if args:
+                        cat, sev, cwe = DESERIALIZATION_SINKS[method]
+                        taint = self.tracker.is_tainted_node(args[0])
+                        if taint:
+                            self._add_finding(
+                                call, f"Unsafe Deserialization via {method}()",
+                                cat, sev, 'HIGH',
+                                f"Tainted data from '{taint.source_type}' passed to {method}(). "
+                                f"Deserializing untrusted data can lead to remote code execution.",
+                                cwe, REMEDIATION_MAP.get(method, "Never deserialize untrusted data."),
+                                source=taint.source_code, sink=f"{method}()"
+                            )
+                        elif self._has_dynamic_content(args[0]) and not self._is_sanitized(args[0]):
+                            self._add_finding(
+                                call, f"Unsafe Deserialization via {method}()",
+                                cat, sev, 'MEDIUM',
+                                f"{method}() called with dynamic content. "
+                                f"Deserializing untrusted data can lead to remote code execution.",
+                                cwe, REMEDIATION_MAP.get(method, "Never deserialize untrusted data."),
+                                source=node_text(args[0])[:120], sink=f"{method}()"
+                            )
+
+                # js-yaml load(): only when object looks like a yaml reference
+                elif method == 'load' and re.match(r'(?i)^(?:ya?ml|jsyaml|jsYaml|YAML)$', obj_str):
+                    if args:
+                        # Check if safeLoad or safe schema is used nearby
+                        call_text = node_text(call)
+                        if 'safeLoad' not in call_text and 'SAFE_SCHEMA' not in call_text:
+                            taint = self.tracker.is_tainted_node(args[0])
+                            conf = 'HIGH' if taint else 'MEDIUM'
+                            source = taint.source_code if taint else node_text(args[0])[:120]
+                            self._add_finding(
+                                call, "Unsafe Deserialization via yaml.load()",
+                                VulnCategory.UNSAFE_DESERIALIZATION, Severity.CRITICAL, conf,
+                                "yaml.load() can execute arbitrary code via YAML deserialization. "
+                                "Use yaml.safeLoad() or pass { schema: SAFE_SCHEMA }.",
+                                "CWE-502", REMEDIATION_MAP.get('load', "Use yaml.safeLoad() instead."),
+                                source=source, sink="yaml.load()"
                             )
 
             # Inter-procedural check
@@ -1103,10 +1302,52 @@ class JSASTAnalyzer:
         for new_expr in find_nodes(self.root, 'new_expression'):
             constructor = get_child_by_field(new_expr, 'constructor')
             args = get_call_args(new_expr)
-            if constructor and constructor.type == 'identifier':
+            if not constructor or not args:
+                continue
+
+            if constructor.type == 'identifier':
                 name = node_text(constructor)
-                if name == 'Function' and args:
+                if name == 'Function':
+                    before = len(self.findings)
                     self._check_sink(new_expr, args[-1], 'Function', CALL_SINKS['Function'])
+                    if (len(self.findings) == before
+                            and self._has_dynamic_content(args[-1])
+                            and not self._is_sanitized(args[-1])):
+                        self._add_finding(
+                            new_expr, "Dangerous Eval via new Function()",
+                            VulnCategory.DANGEROUS_EVAL, Severity.CRITICAL, 'HIGH',
+                            "new Function() called with dynamic content. "
+                            "Any non-literal argument enables arbitrary code injection.",
+                            "CWE-95", REMEDIATION_MAP.get('Function', "Avoid the Function constructor with user input."),
+                            source=node_text(args[-1])[:120], sink="new Function()"
+                        )
+
+            elif constructor.type == 'member_expression':
+                obj = get_child_by_field(constructor, 'object')
+                prop = get_child_by_field(constructor, 'property')
+                if obj and prop:
+                    prop_name = node_text(prop)
+                    # new vm.Script(code)
+                    if prop_name == 'Script':
+                        taint = self.tracker.is_tainted_node(args[0])
+                        if taint:
+                            self._add_finding(
+                                new_expr, "Dangerous Eval via new vm.Script()",
+                                VulnCategory.DANGEROUS_EVAL, Severity.CRITICAL, 'HIGH',
+                                f"Tainted data from '{taint.source_type}' passed to new vm.Script(). "
+                                f"The vm module is not a security sandbox.",
+                                "CWE-95", REMEDIATION_MAP.get('Script', "Never pass user-controlled code to vm.Script()."),
+                                source=taint.source_code, sink="new vm.Script()"
+                            )
+                        elif self._has_dynamic_content(args[0]) and not self._is_sanitized(args[0]):
+                            self._add_finding(
+                                new_expr, "Dangerous Eval via new vm.Script()",
+                                VulnCategory.DANGEROUS_EVAL, Severity.CRITICAL, 'HIGH',
+                                "new vm.Script() called with dynamic content. "
+                                "Any non-literal argument enables arbitrary code execution.",
+                                "CWE-95", REMEDIATION_MAP.get('Script', "Never pass user-controlled code to vm.Script()."),
+                                source=node_text(args[0])[:120], sink="new vm.Script()"
+                            )
 
     # ------------------------------------------------------------------
     # For-in prototype pollution

@@ -104,13 +104,13 @@ Tracked sources include `repo.findById()`, `cursor.fetchone()`, `Model.findOne()
 | XPath/XQuery Injection | Yes | Yes | All 7 |
 | XXE & XSLT | Yes | - | All 7 |
 | SSTI | Yes | - | All 7 |
-| Insecure Deserialization (OIS, SnakeYAML, XStream, XMLDecoder, Jackson, Kryo, Hessian) | Yes | Double-unserialize | All 7 |
+| Insecure Deserialization (OIS, SnakeYAML, XStream, XMLDecoder, Jackson, Kryo, Hessian, node-serialize, serialijse, js-yaml) | Yes | Double-unserialize | All 7 |
 | Expression Language (SpEL, OGNL, MVEL, EL) | Yes | - | Java |
 | Reflection Injection | Yes | - | Java |
 
 | Vulnerable Dependencies (`npm audit`) | Yes | - | JS (both scanners) |
 
-**Not detected:** XSS (use js-treesitter.py for JS), Weak Crypto, Session Fixation, Prototype Pollution (use js-treesitter.py for JS).
+**Not detected:** XSS (use js-treesitter.py for JS), Weak Crypto, Session Fixation, Prototype Pollution (use js-treesitter.py for JS), vm module code injection (use js-treesitter.py for JS).
 
 ---
 
@@ -172,7 +172,7 @@ python3 java-treesitter.py target/ [options]
 
 ### js-treesitter.py - JavaScript AST Scanner
 
-Deep JavaScript analysis using [tree-sitter](https://tree-sitter.github.io/) with **file-level taint tracking**. Covers 7 vulnerability categories: DOM XSS, Reflected XSS, Prototype Pollution, Dangerous Eval, Open Redirect, Command Injection, and Vulnerable Dependencies (`npm audit`). Supports ES6+, Express.js, jQuery, and HTML inline scripts. Automatically skips vendor/third-party library files.
+Deep JavaScript analysis using [tree-sitter](https://tree-sitter.github.io/) with **file-level taint tracking**. Covers 8 vulnerability categories: DOM XSS, Reflected XSS, Prototype Pollution, Dangerous Eval, Command Injection, Unsafe Deserialization, Open Redirect, and Vulnerable Dependencies (`npm audit`). Detects dangerous sinks even without a proven taint chain (eval with dynamic args, vm module, spawn with `{shell: true}`, node-serialize, js-yaml). Supports ES6+, Express.js, jQuery, and HTML inline scripts. Automatically skips vendor/third-party library files.
 
 ```bash
 pip3 install tree-sitter tree-sitter-javascript
