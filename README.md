@@ -14,12 +14,13 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.8+-3776ab?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.8+">
-  <img src="https://img.shields.io/badge/languages-7+-22c55e?style=for-the-badge" alt="7+ Languages">
+  <img src="https://img.shields.io/badge/languages-8+-22c55e?style=for-the-badge" alt="8+ Languages">
   <img src="https://img.shields.io/badge/2nd--Order-Detection-ff6b6b?style=for-the-badge" alt="2nd-Order">
   <img src="https://img.shields.io/badge/version-3.0-blueviolet?style=for-the-badge" alt="Version">
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/C%2FC%2B%2B-00599C?style=flat-square&logo=c%2B%2B&logoColor=white" alt="C/C++">
   <img src="https://img.shields.io/badge/C%23-239120?style=flat-square&logo=csharp&logoColor=white" alt="C#">
   <img src="https://img.shields.io/badge/Java-ED8B00?style=flat-square&logo=openjdk&logoColor=white" alt="Java">
   <img src="https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=black" alt="JavaScript">
@@ -47,6 +48,10 @@ python3 vulnhunter.py /path/to/project
 
 # JSON output
 python3 vulnhunter.py project/ --output json -o report.json
+
+# C/C++ AST scanner (memory safety, integer, dangerous functions)
+pip3 install tree-sitter tree-sitter-c tree-sitter-cpp
+python3 c_cpp_treesitter_scanner.py /path/to/c/project
 
 # Java AST scanner (deeper analysis via tree-sitter)
 pip3 install tree-sitter tree-sitter-java
@@ -118,6 +123,7 @@ Tracked sources include `repo.findById()`, `cursor.fetchone()`, `Model.findOne()
 
 | Language | Extensions | Frameworks | Scanner |
 |----------|------------|------------|---------|
+| **C/C++** | `.c`, `.cpp`, `.cc`, `.h`, `.hpp` | POSIX, network parsers | c_cpp_treesitter_scanner.py (AST) |
 | **Java** | `.java` | Spring, JPA/Hibernate, Struts2, Servlets | vulnhunter.py (regex) or java-treesitter.py (AST) |
 | **C#** | `.cs` | ASP.NET, Entity Framework | vulnhunter.py |
 | **JavaScript** | `.js`, `.jsx` | Express, Mongoose, Sequelize | vulnhunter.py (regex) or js-treesitter.py (AST) |
@@ -130,6 +136,7 @@ Tracked sources include `repo.findById()`, `cursor.fetchone()`, `Model.findOne()
 
 | Language | AST Taint | Regex Taint | Pattern Match | Notes |
 |----------|:---------:|:-----------:|:------------:|-------|
+| C/C++ <sup>TS</sup> | **~80%** | - | ~20% | Tree-sitter per-function analysis, alias tracking |
 | Python | ~60% | ~10% | ~30% | Full AST via `ast.NodeVisitor` |
 | Java <sup>TS</sup> | **~85%** | - | ~15% | Tree-sitter per-method taint |
 | Java | - | ~45% | ~55% | Regex-based Spring annotation analysis |
@@ -182,6 +189,42 @@ python3 js-treesitter.py target/ [options]
   --min-confidence LEVEL      HIGH, MEDIUM, or LOW
   -v, --verbose               Detailed output
 ```
+
+### c_cpp_treesitter_scanner.py - C/C++ AST Scanner
+
+Deep C/C++ analysis using [tree-sitter](https://tree-sitter.github.io/) with **per-function variable type tracking**, pointer alias analysis, and NULL-deref chain detection. Covers 16 vulnerability rules across 4 categories: memory safety, pointer/array issues, integer bugs, and dangerous functions. Detects dangling pointers via intermediate variables (`ptr = &local; return ptr`), unsigned integer underflow, unvalidated network-derived sizes in memcpy, malloc overflow, use-after-free, double-free, and format string vulnerabilities. Default output shows only CRITICAL+HIGH confidence findings.
+
+```bash
+pip3 install tree-sitter tree-sitter-c tree-sitter-cpp
+python3 c_cpp_treesitter_scanner.py target/ [options]
+  --output {text,json}        Output format
+  -o, --output-file FILE      Save to file
+  --jsonl                     JSON Lines output (one finding per line)
+  --min-severity LEVEL        CRITICAL, HIGH, MEDIUM, LOW, or INFO
+  --min-confidence LEVEL      HIGH, MEDIUM, or LOW
+  --all                       Show all findings (no default filters)
+```
+
+#### C/C++ Detection Rules (16)
+
+| Category | Rule ID | Description | Severity |
+|---|---|---|---|
+| Memory Safety | MEM-UNSAFE-COPY | strcpy/strcat/sprintf/gets without bounds | HIGH |
+| Memory Safety | MEM-BUFFER-OOB | Array write with variable/unbounded index | MEDIUM |
+| Memory Safety | MEM-USE-AFTER-FREE | Pointer used after free/delete | CRITICAL |
+| Memory Safety | MEM-DOUBLE-FREE | Same pointer freed twice | CRITICAL |
+| Memory Safety | MEM-RETURN-LOCAL | Return address of stack variable | HIGH |
+| Memory Safety | MEM-DANGLING-PTR | Stack-local pointer returned via intermediate | CRITICAL |
+| Memory Safety | MEM-NULL-DEREF | malloc/calloc result used without NULL check | CRITICAL |
+| Memory Safety | MEM-UNVALIDATED-SIZE | Network byte-conversion value as memcpy size | CRITICAL |
+| Pointer/Array | PTR-ARITH | Dereference with computed offset *(p + n) | MEDIUM |
+| Pointer/Array | PTR-OOB-INDEX | Negative or subtraction in array index | MEDIUM |
+| Integer | INT-SIGN-COMPARE | Signed vs unsigned comparison | MEDIUM |
+| Integer | INT-NARROW | Implicit/explicit narrowing cast | MEDIUM |
+| Integer | INT-OVERFLOW-ALLOC | Multiplication in malloc size may overflow | HIGH |
+| Integer | INT-UNDERFLOW | Unsigned subtraction wrap-around | CRITICAL |
+| Dangerous Funcs | DANGER-EXEC | system/popen/exec* with variable command | HIGH |
+| Dangerous Funcs | DANGER-FORMAT | printf-family with non-literal format string | HIGH |
 
 ### php-treesitter.py - PHP AST Scanner
 
@@ -242,13 +285,17 @@ Sanitizer-aware: `intval`, `(int)` cast, `escapeshellarg`, `escapeshellcmd`, `fi
 
 ```
 vulnhunter/
-├── vulnhunter.py          # Multi-language SAST scanner (7 languages)
-├── java-treesitter.py     # Java AST scanner (tree-sitter)
-├── js-treesitter.py       # JavaScript AST scanner (tree-sitter)
-├── php-treesitter.py      # PHP AST scanner (tree-sitter)
+├── vulnhunter.py                  # Multi-language SAST scanner (7 languages)
+├── c_cpp_treesitter_scanner.py    # C/C++ AST scanner (tree-sitter, 16 rules)
+├── java-treesitter.py             # Java AST scanner (tree-sitter)
+├── js-treesitter.py               # JavaScript AST scanner (tree-sitter)
+├── php-treesitter.py              # PHP AST scanner (tree-sitter)
 ├── requirements.txt
-├── test_samples/           # FP/FN test suites
-└── test-files/            # Vulnerability test cases per language
+├── test_samples/                   # FP/FN test suites
+└── test-files/                    # Vulnerability test cases per language
+    ├── c_cpp_fp_fn_test.c         # C/C++ TP/TN/FP/FN comprehensive test
+    ├── c_cpp_scanner_test.c       # C/C++ rule coverage test
+    └── c_cpp_test_project/        # Multi-file C project test suite
 ```
 
 ---
