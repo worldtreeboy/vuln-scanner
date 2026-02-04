@@ -925,9 +925,23 @@ class JSASTAnalyzer:
                     # Tainted key
                     elif self.tracker.is_tainted_node(index_node):
                         key_taint = self.tracker.is_tainted_node(index_node)
+                        # Confidence based on taint source: only flag with
+                        # HIGH/MEDIUM when the key is genuinely user-controlled
+                        _HIGH_TAINT = (
+                            'express_query', 'express_body', 'express_params',
+                            'express_headers', 'express_cookies',
+                            'url', 'query', 'hash', 'postmessage', 'cookie',
+                        )
+                        _MED_TAINT = ('input', 'storage', 'json_parse', 'fetch_response')
+                        if key_taint.source_type in _HIGH_TAINT:
+                            pp_conf = 'HIGH'
+                        elif key_taint.source_type in _MED_TAINT:
+                            pp_conf = 'MEDIUM'
+                        else:
+                            pp_conf = 'LOW'
                         self._add_finding(
                             assign, "Potential Prototype Pollution",
-                            VulnCategory.PROTOTYPE_POLLUTION, Severity.HIGH, 'MEDIUM',
+                            VulnCategory.PROTOTYPE_POLLUTION, Severity.HIGH, pp_conf,
                             f"Dynamic property assignment with tainted key. If key is '__proto__', prototype pollution occurs.",
                             "CWE-1321", "Validate keys against '__proto__', 'constructor', 'prototype'. Use Object.create(null) or Map.",
                             source=key_taint.source_code, sink="computed property assignment"
@@ -988,7 +1002,7 @@ class JSASTAnalyzer:
                             self._check_sink(call, first_arg, func_name, CALL_SINKS[func_name])
                         # Non-literal variable arg (identifier, member_expression, etc.)
                         # passed as code string is dangerous
-                        elif (first_arg.type not in ('arrow_function', 'function')
+                        elif (first_arg.type not in ('arrow_function', 'function_expression', 'function', 'generator_function')
                               and self._has_dynamic_content(first_arg)
                               and not self._is_sanitized(first_arg)):
                             self._add_finding(
@@ -1120,15 +1134,24 @@ class JSASTAnalyzer:
                 elif method in DANGEROUS_MERGE_FUNCS and method != 'assign':
                     is_deep = (method == 'extend' and args and
                                node_text(args[0]) == 'true')
-                    conf = 'HIGH' if is_deep or method in ('merge', 'mergeWith', 'defaultsDeep') else 'MEDIUM'
+                    base_conf = 'HIGH' if is_deep or method in ('merge', 'mergeWith', 'defaultsDeep') else 'MEDIUM'
                     for arg in args:
-                        if self.tracker.is_tainted_node(arg):
+                        taint = self.tracker.is_tainted_node(arg)
+                        if taint:
+                            # Elevate confidence when source is known user-controlled
+                            conf = base_conf
+                            if taint.source_type in (
+                                'express_body', 'express_query', 'express_params',
+                                'express_headers', 'express_cookies',
+                                'json_parse', 'postmessage',
+                            ):
+                                conf = 'HIGH'
                             self._add_finding(
                                 call, f"Prototype Pollution via {method}()",
                                 VulnCategory.PROTOTYPE_POLLUTION, Severity.HIGH, conf,
                                 f"Tainted data passed to {method}() can cause prototype pollution",
                                 "CWE-1321", f"Validate input before passing to {method}().",
-                                sink=method
+                                source=taint.source_code, sink=method
                             )
                             break
 
@@ -1148,7 +1171,10 @@ class JSASTAnalyzer:
                             )
 
                 # Command sinks
-                elif method in COMMAND_SINKS:
+                # Skip exec() on method chains (Mongoose Query.exec(), not child_process.exec())
+                elif method in COMMAND_SINKS and not (
+                    method == 'exec' and obj_node and obj_node.type == 'call_expression'
+                ):
                     if args:
                         cat, sev, cwe = COMMAND_SINKS[method]
                         # Check ALL arguments for taint (spawn/execFile use

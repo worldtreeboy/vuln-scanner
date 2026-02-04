@@ -172,7 +172,7 @@ python3 java-treesitter.py target/ [options]
 
 ### js-treesitter.py - JavaScript AST Scanner
 
-Deep JavaScript analysis using [tree-sitter](https://tree-sitter.github.io/) with **file-level taint tracking**. Covers 8 vulnerability categories: DOM XSS, Reflected XSS, Prototype Pollution, Dangerous Eval, Command Injection, Unsafe Deserialization, Open Redirect, and Vulnerable Dependencies (`npm audit`). Detects dangerous sinks even without a proven taint chain (eval with dynamic args, vm module, spawn with `{shell: true}`, node-serialize, js-yaml). Supports ES6+, Express.js, jQuery, and HTML inline scripts. Automatically skips vendor/third-party library files.
+Deep JavaScript analysis using [tree-sitter](https://tree-sitter.github.io/) with **file-level taint tracking**. Covers 8 vulnerability categories: DOM XSS, Reflected XSS, Prototype Pollution, Dangerous Eval, Command Injection, Unsafe Deserialization, Open Redirect, and Vulnerable Dependencies (`npm audit`). Detects dangerous sinks even without a proven taint chain (eval with dynamic args, vm module, spawn with `{shell: true}`, node-serialize, js-yaml). FP-aware: distinguishes Mongoose `Query.exec()` from `child_process.exec()`, excludes `setTimeout` with function args, and uses source-aware confidence for computed-property prototype pollution. Supports ES6+, Express.js, jQuery, and HTML inline scripts. Automatically skips vendor/third-party library files.
 
 ```bash
 pip3 install tree-sitter tree-sitter-javascript
