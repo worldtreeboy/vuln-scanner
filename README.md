@@ -1,0 +1,305 @@
+<h1 align="center">
+  <br>
+  <pre>
+██╗   ██╗██╗██████╗ ███████╗██╗  ██╗██╗   ██╗███╗   ██╗████████╗███████╗██████╗
+██║   ██║██║██╔══██╗██╔════╝██║  ██║██║   ██║████╗  ██║╚══██╔══╝██╔════╝██╔══██╗
+██║   ██║██║██████╔╝█████╗  ███████║██║   ██║██╔██╗ ██║   ██║   █████╗  ██████╔╝
+╚██╗ ██╔╝██║██╔══██╗██╔══╝  ██╔══██║██║   ██║██║╚██╗██║   ██║   ██╔══╝  ██╔══██╗
+ ╚████╔╝ ██║██████╔╝███████╗██║  ██║╚██████╔╝██║ ╚████║   ██║   ███████╗██║  ██║
+  ╚═══╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝   ╚═╝   ╚══════╝╚═╝  ╚═╝
+  </pre>
+</h1>
+
+<h3 align="center">Multi-Language SAST with 2nd-Order Injection Detection</h3>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.8+-3776ab?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.8+">
+  <img src="https://img.shields.io/badge/languages-7+-22c55e?style=for-the-badge" alt="7+ Languages">
+  <img src="https://img.shields.io/badge/2nd--Order-Detection-ff6b6b?style=for-the-badge" alt="2nd-Order">
+  <img src="https://img.shields.io/badge/version-3.0-blueviolet?style=for-the-badge" alt="Version">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/C%23-239120?style=flat-square&logo=csharp&logoColor=white" alt="C#">
+  <img src="https://img.shields.io/badge/Java-ED8B00?style=flat-square&logo=openjdk&logoColor=white" alt="Java">
+  <img src="https://img.shields.io/badge/JavaScript-F7DF1E?style=flat-square&logo=javascript&logoColor=black" alt="JavaScript">
+  <img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/PHP-777BB4?style=flat-square&logo=php&logoColor=white" alt="PHP">
+  <img src="https://img.shields.io/badge/Ruby-CC342D?style=flat-square&logo=ruby&logoColor=white" alt="Ruby">
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript">
+</p>
+
+---
+
+> **Disclaimer:** This is a **hobby/learning project** for educational purposes. It is **NOT** a replacement for professional SAST tools like [Semgrep](https://semgrep.dev/), [CodeQL](https://codeql.github.com/), [Snyk](https://snyk.io/), or [SonarQube](https://www.sonarqube.org/). Use this to learn about static analysis concepts or as a starting point for security research.
+
+---
+
+## Quick Start
+
+```bash
+git clone https://github.com/worldtreeboy/vibehunter.git
+cd vibehunter
+pip3 install -r requirements.txt
+
+# Scan a project (Python, Java, JS/TS, PHP, C#, Ruby)
+python3 vibehunter.py /path/to/project
+
+# JSON output
+python3 vibehunter.py project/ --output json -o report.json
+
+# Java AST scanner (deeper analysis via tree-sitter)
+pip3 install tree-sitter tree-sitter-java
+python3 java-treesitter.py /path/to/java/project
+
+# JavaScript AST scanner (deeper analysis via tree-sitter)
+pip3 install tree-sitter tree-sitter-javascript
+python3 js-treesitter.py /path/to/js/project
+
+# PHP AST scanner (deeper analysis via tree-sitter)
+pip3 install tree-sitter tree-sitter-php
+python3 php-treesitter.py /path/to/php/project
+```
+
+---
+
+## Proven Results
+
+Tested against industry-standard vulnerable applications:
+
+| Application | Files | Critical | High | Medium | Total |
+|---|:---:|:---:|:---:|:---:|:---:|
+| **WebGoat (OWASP)** | 469 | 32 | 86 | 4 | **122** |
+| **Damn Vulnerable RESTaurant API** | 74 | 21 | 1 | 0 | **22** |
+| **Vulnerable-Flask-App** | 2 | 10 | 8 | 0 | **18** |
+| **NodeGoat (OWASP)** | 39 | 3 | 5 | 4 | **12** |
+| **RailsGoat (OWASP)** | 22 | 5 | 15 | 0 | **20** |
+| **DVCSharp API** | 10 | 3 | 6 | 0 | **9** |
+| **DVJA (Struts2)** <sup>TS</sup> | 21 | 2 | 2 | 0 | **4** |
+| **TOTAL** | **637** | **76** | **123** | **12** | **207** |
+
+<sub><sup>TS</sup> = Scanned with java-treesitter.py (AST-based scanner)</sub>
+
+---
+
+## What Makes VibeHunter Different?
+
+Most SAST tools detect **1st-order injection** where user input flows directly to a sink. VibeHunter also detects **2nd-order injection** where payloads are stored in the database first, then retrieved and used unsafely later.
+
+```
+Attacker stores payload in DB  ──>  App fetches data  ──>  Data used in query/command  ──>  Payload executes
+```
+
+Tracked sources include `repo.findById()`, `cursor.fetchone()`, `Model.findOne()`, `pd.read_sql()`, `fetch_assoc()`, ActiveRecord finders, and more across all 7 languages.
+
+---
+
+## Detection Categories
+
+| Category | 1st-Order | 2nd-Order | Languages |
+|----------|:---------:|:---------:|-----------|
+| SQL/NoSQL/HQL Injection | Yes | Yes | All 7 |
+| Command Injection | Yes | Yes | All 7 |
+| Code Injection (eval, SpEL, OGNL, pandas) | Yes | Yes | All 7 |
+| XPath/XQuery Injection | Yes | Yes | All 7 |
+| XXE & XSLT | Yes | - | All 7 |
+| SSTI | Yes | - | All 7 |
+| Insecure Deserialization (OIS, SnakeYAML, XStream, XMLDecoder, Jackson, Kryo, Hessian, node-serialize, serialijse, js-yaml, phar://) | Yes | Yes | All 7 |
+| Expression Language (SpEL, OGNL, MVEL, EL) | Yes | - | Java |
+| Reflection Injection | Yes | - | Java |
+
+| Vulnerable Dependencies (`npm audit`) | Yes | - | JS (both scanners) |
+
+**Not detected:** XSS (use js-treesitter.py for JS), Weak Crypto, Session Fixation, Prototype Pollution (use js-treesitter.py for JS), vm module code injection (use js-treesitter.py for JS), NoSQL Injection in JS (use js-treesitter.py).
+
+---
+
+## Language Support
+
+| Language | Extensions | Frameworks | Scanner |
+|----------|------------|------------|---------|
+| **Java** | `.java` | Spring, JPA/Hibernate, Struts2, Servlets | vibehunter.py (regex) or java-treesitter.py (AST) |
+| **C#** | `.cs` | ASP.NET, Entity Framework | vibehunter.py |
+| **JavaScript** | `.js`, `.jsx` | Express, Mongoose, Sequelize | vibehunter.py (regex) or js-treesitter.py (AST) |
+| **TypeScript** | `.ts`, `.tsx` | Node.js, TypeORM, NestJS | vibehunter.py |
+| **Python** | `.py` | Flask, Django, SQLAlchemy, Pandas | vibehunter.py |
+| **PHP** | `.php` | Laravel, PDO, mysqli, Twig, MongoDB | vibehunter.py (regex) or php-treesitter.py (AST) |
+| **Ruby** | `.rb` | Rails, ActiveRecord, Sinatra | vibehunter.py |
+
+### Analysis Techniques
+
+| Language | AST Taint | Regex Taint | Pattern Match | Notes |
+|----------|:---------:|:-----------:|:------------:|-------|
+| Python | ~60% | ~10% | ~30% | Full AST via `ast.NodeVisitor` |
+| Java <sup>TS</sup> | **~90%** | - | ~10% | Tree-sitter per-method taint, taint killers, for-each/try-with-resources propagation |
+| Java | - | ~45% | ~55% | Regex-based Spring annotation analysis |
+| JS/TS <sup>TS</sup> | **~90%** | - | ~10% | Tree-sitter file-level taint, safe-literal tracking, require alias resolution |
+| JS/TS | - | ~30% | ~70% | Regex source-sink tracking |
+| PHP <sup>TS</sup> | **~85%** | - | ~15% | Tree-sitter per-function taint |
+| PHP | - | ~35% | ~65% | `$_GET`/`$_POST` variable tracking |
+| C# | - | ~40% | ~60% | Constructor flow, LINQ taint tunnel |
+| Ruby | - | ~30% | ~70% | `params[]` tracking, ActiveRecord sinks |
+
+---
+
+## Scanners
+
+### vibehunter.py - Multi-Language Scanner
+
+The main scanner supporting all 7 languages with taint tracking, evasion detection, confidence scoring, and false positive reduction (parameterized queries, sanitization, allowlists, safe deserialization). Includes `npm audit` integration for JavaScript dependency vulnerability detection.
+
+```bash
+python3 vibehunter.py target/ [options]
+  --output {text,json}        Output format
+  -o, --output-file FILE      Save to file
+  --min-confidence LEVEL      HIGH, MEDIUM, or LOW
+  --scan-all                  Include vendor/minified files
+  -v, --verbose               Detailed output
+```
+
+### java-treesitter.py - Java AST Scanner
+
+Deep Java analysis using [tree-sitter](https://tree-sitter.github.io/) with **per-method taint scoping**. Covers 12 vulnerability categories including JNDI injection, mass assignment, reflection injection, Spring Data `@Query` annotation analysis, and comprehensive deserialization detection (ObjectInputStream, SnakeYAML, XStream, XMLDecoder, Jackson polymorphic typing, Kryo, Hessian/Burlap). Safe pattern recognition: `ValidatingObjectInputStream`, `ObjectInputFilter` (Java 9+), `SafeConstructor`, `setRegistrationRequired(true)`. Framework-agnostic (Spring, Spring Data JPA, Struts2, Servlets, plain Java).
+
+**Taint tracking features:**
+- Per-method taint scoping with multi-pass propagation
+- Enhanced for-loop propagation (`for (String x : taintedList)`)
+- Try-with-resources propagation (`try (InputStream is = req.getInputStream())`)
+- Taint-killing type conversions (`Integer.parseInt()`, `Long.parseLong()`, `UUID.fromString()`, `Boolean.parseBoolean()`, `Math.*`) — eliminates false positives when input is validated via type conversion
+- StringBuilder/List taint propagation via `.append()` and `.add()`
+- Partial parameterization detection — `"SELECT FROM " + table + " WHERE id = ?"` is correctly flagged (the `?` only covers `id`, not `table`)
+- SQL receiver gating for ambiguous method names (`execute`, `query`) to prevent false positives on non-SQL receivers
+
+```bash
+pip3 install tree-sitter tree-sitter-java
+python3 java-treesitter.py target/ [options]
+  --output {text,json}        Output format
+  -o, --output-file FILE      Save to file
+  --min-severity LEVEL        CRITICAL, HIGH, MEDIUM, or LOW
+  --all                       Show all confidence levels
+```
+
+### js-treesitter.py - JavaScript AST Scanner
+
+Deep JavaScript analysis using [tree-sitter](https://tree-sitter.github.io/) with **file-level taint tracking**. Covers 9 vulnerability categories: DOM XSS, Reflected XSS, Prototype Pollution, Dangerous Eval, Command Injection, **NoSQL Injection**, Unsafe Deserialization, Open Redirect, and Vulnerable Dependencies (`npm audit`).
+
+**Taint tracking features:**
+- Multi-pass source-to-sink propagation with destructuring support (`const { a } = req.body`)
+- Safe literal tracking — `const cmd = 'ls'; exec(cmd)` is correctly ignored (no FP)
+- `require()` alias resolution — distinguishes `child_process.exec()` from Mongoose `Query.exec()`
+- Direct and method-call command sink detection (`exec(tainted)` and `cp.exec(tainted)`)
+- NoSQL injection detection with safe-object-literal analysis (`User.find({type: 'admin'})` is clean; `User.find(req.body)` is flagged)
+- Taint-neutralizing functions (`encodeURIComponent`, `parseInt`, `DOMPurify.sanitize`) break the taint chain
+- `process.argv` / `process.env` tracked as taint sources
+- `spawn`/`spawnSync` with array args and no `{shell: true}` correctly suppressed
+- `setTimeout(funcRef, ms)` with function references correctly suppressed (only strings flagged)
+- DOM-context-aware `.value` detection (only flags `getElementById(...).value`, not `config.value`)
+
+Supports ES6+, Express.js, Mongoose, jQuery, and HTML inline scripts. Automatically skips vendor/third-party library files.
+
+```bash
+pip3 install tree-sitter tree-sitter-javascript
+python3 js-treesitter.py target/ [options]
+  --output {text,json}        Output format
+  -o, --output-file FILE      Save to file
+  --min-confidence LEVEL      HIGH, MEDIUM, or LOW
+  -v, --verbose               Detailed output
+```
+
+### php-treesitter.py - PHP AST Scanner
+
+Deep PHP analysis using [tree-sitter](https://tree-sitter.github.io/) with **per-function taint tracking** and sanitizer awareness. Covers 12 vulnerability categories across all major PHP sinks including phar:// deserialization, second-order deserialization, and gadget chain detection. Taint sources: `$_GET`, `$_POST`, `$_REQUEST`, `$_COOKIE`, `$_SERVER`, `$_FILES`, `$_ENV`, `file_get_contents("php://input")`, `getenv()`, and public function parameters.
+
+```bash
+pip3 install tree-sitter tree-sitter-php
+python3 php-treesitter.py target/ [options]
+  --output {text,json}        Output format
+  -o, --output-file FILE      Save to file
+  --min-severity LEVEL        CRITICAL, HIGH, MEDIUM, or LOW
+  --all                       Show all confidence levels
+```
+
+#### Detection Quality Matrix
+
+| Category | Sinks | Severity |
+|---|---|---|
+| SQL Injection | `mysql_query`, `mysqli_query`, `pg_query`, `->query()`, `->exec()`, `->prepare()` with concat | CRITICAL |
+| Command Injection | `exec`, `system`, `passthru`, `shell_exec`, `popen`, `proc_open`, `pcntl_exec`, backtick | CRITICAL |
+| Code Injection | `eval`, `assert`, `create_function`, `preg_replace /e` | CRITICAL |
+| Insecure Deserialization | `unserialize`, `yaml_parse`, `igbinary_unserialize`, `msgpack_unpack`, `wddx_deserialize`, `json_decode` (without assoc), phar:// trigger functions | CRITICAL |
+| Gadget Chain Indicators | Magic methods (`__wakeup`, `__destruct`, `__toString`, etc.) calling dangerous functions | LOW |
+| XXE | `DOMDocument->loadXML/loadHTML`, `simplexml_load_string`, `XMLReader` | HIGH |
+| XPath Injection | `DOMXPath->query/evaluate` | HIGH |
+| SSTI | Twig `->render`/`->createTemplate`, Smarty `->fetch("string:")` | HIGH |
+| NoSQL Injection | MongoDB `->find`, `->findOne`, `->aggregate`, `->deleteMany`, `->updateMany` | CRITICAL |
+| Second-order SQLi | DB-fetched data (`->fetch()`, `mysqli_fetch_*`, `pg_fetch_*`) in raw SQL concat | HIGH |
+| Second-order Deserialization | DB-fetched data in `unserialize`, `yaml_parse`, `igbinary_unserialize`, `msgpack_unpack`, `wddx_deserialize` | HIGH |
+| Phar Deserialization | Tainted paths in `file_get_contents`, `file_exists`, `fopen`, `getimagesize`, `include`/`require`, and 20+ filesystem functions | CRITICAL |
+
+**FP/FN test results** (178 test functions, 1355 lines):
+
+| Metric | Value |
+|---|---|
+| Precision | 100% |
+| Recall | 100% |
+| False Positives | 0 |
+| False Negatives | 0 |
+
+Sanitizer-aware: `intval`, `(int)` cast, `escapeshellarg`, `escapeshellcmd`, `filter_var`, `basename`, `realpath`, and more are recognized as taint-killing operations.
+
+---
+
+## CI/CD Integration
+
+```yaml
+# GitHub Actions
+- name: Security Scan
+  run: |
+    python3 vibehunter.py . --min-confidence HIGH --output json -o results.json
+    if grep -q '"severity": "CRITICAL"' results.json; then
+      echo "::error::Critical vulnerabilities found!"
+      exit 1
+    fi
+```
+
+---
+
+## Project Structure
+
+```
+vibehunter/
+├── vibehunter.py                  # Multi-language SAST scanner (7 languages)
+├── java-treesitter.py             # Java AST scanner (tree-sitter)
+├── js-treesitter.py               # JavaScript AST scanner (tree-sitter)
+├── php-treesitter.py              # PHP AST scanner (tree-sitter)
+├── requirements.txt
+├── test_samples/                   # FP/FN test suites
+└── test-files/                    # Vulnerability test cases per language
+    ├── java_evasive_comprehensive_test.java  # Java evasive pattern tests
+    ├── java_treesitter_improvement_test.java # Java taint-tracking FP/FN tests (19 cases)
+    ├── php_deserialization_test.php           # PHP deserialization/phar/gadget tests
+    └── php_second_order_test.php             # PHP 2nd-order SQLi & deserialization tests
+```
+
+---
+
+## Disclaimer
+
+This tool is for **authorized security testing only**. Always obtain proper authorization before scanning. Verify findings manually.
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+<p align="center">
+  <b>Created by worldtreeboy</b><br>
+  <sub>Hunting 2nd-order vulnerabilities that others miss.</sub>
+</p>
+
+<p align="center">
+  <a href="https://github.com/worldtreeboy">
+    <img src="https://img.shields.io/badge/GitHub-worldtreeboy-181717?style=for-the-badge&logo=github" alt="GitHub">
+  </a>
+</p>
